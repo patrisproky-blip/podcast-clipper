@@ -489,6 +489,35 @@ def selftest():
         import ctranslate2
         return f"ctranslate2 {ctranslate2.__version__}, VAD {onnx[0].name}"
 
+    def t_audio():
+        from faster_whisper.audio import decode_audio
+        from platform_utils import ffmpeg_path, hidden_subprocess_kwargs
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "a.wav"
+            subprocess.run([ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                            "sine=frequency=300:duration=2", str(wav)], check=True, **hidden_subprocess_kwargs())
+            audio = decode_audio(str(wav))
+            assert len(audio) > 16000, "dekódování zvuku vrátilo málo dat"
+            return f"{len(audio)} vzorků"
+
+    def t_onnx():
+        import faster_whisper
+        import onnxruntime
+        onnx = next((Path(faster_whisper.__file__).parent / "assets").glob("*.onnx"))
+        onnxruntime.InferenceSession(str(onnx), providers=["CPUExecutionProvider"])
+        return f"onnxruntime {onnxruntime.__version__}"
+
+    def t_transcribe():
+        from faster_whisper import WhisperModel
+        from platform_utils import ffmpeg_path, hidden_subprocess_kwargs
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "a.wav"
+            subprocess.run([ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                            "sine=frequency=300:duration=3", str(wav)], check=True, **hidden_subprocess_kwargs())
+            model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            segs, info = model.transcribe(str(wav), language="cs", word_timestamps=True, vad_filter=True)
+            return f"model tiny funguje, segmentů: {len(list(segs))}"
+
     def t_anthropic():
         import anthropic
         import selector  # noqa: F401
@@ -520,6 +549,9 @@ def selftest():
     check("OpenCV a detektor tváří", t_cv2, required=FROZEN)
     check("yt-dlp", t_ytdlp)
     check("faster-whisper", t_whisper)
+    check("dekódování zvuku", t_audio)
+    check("ONNX runtime (VAD)", t_onnx)
+    check("zkušební přepis (model tiny)", t_transcribe, required=False)  # potřebuje internet
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
     check("zkušební render klipu", t_render)

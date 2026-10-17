@@ -76,6 +76,18 @@ jobs:
           path: PodcastClipper-*.zip
           retention-days: 30
 
+      - name: Uložit výsledek samotestu
+        if: always()
+        shell: bash
+        run: cp "$HOME/PodcastClipper/selftest.log" "selftest-${{ matrix.label }}.log" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-${{ matrix.label }}
+          path: selftest-*.log
+          if-no-files-found: ignore
+
       - name: Zapsat log při chybě
         if: failure()
         shell: bash
@@ -102,12 +114,28 @@ jobs:
 
       - run: ls -la release
 
+      - uses: actions/download-artifact@v4
+        with:
+          path: selftests
+          pattern: selftest-*
+          merge-multiple: true
+
+      - name: Sestavit popis vydání
+        shell: bash
+        run: |
+          {
+            echo "Stáhněte zip pro svůj systém (Windows nebo macOS), rozbalte a spusťte. Návod je v souboru README.md."
+            echo; echo "Výsledek samotestu:"
+            for f in selftests/*.log; do
+              [ -e "$f" ] || continue
+              echo; echo "$(basename "$f")"; echo '```'; cat "$f"; echo '```'
+            done
+          } > body.md
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Podcast Clipper (sestavení ${{ github.run_number }})
-          body: |
-            Stáhněte zip pro svůj systém (Windows nebo macOS), rozbalte a spusťte.
-            Návod je v souboru README.md.
+          body_path: body.md
           files: release/*.zip
           make_latest: true
