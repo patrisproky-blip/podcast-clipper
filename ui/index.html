@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Podcast Clipper</title>
+<style>
+:root{
+  --bg:#f6f5f2; --surface:#fff; --text:#1c1b1a; --muted:#6d6a66; --line:#e4e1db;
+  --accent:#e4572e; --accent-ink:#fff; --ok:#2e8b57; --err:#c0392b; --track:#ece9e3;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#161514; --surface:#201f1d; --text:#f1efeb; --muted:#9a968f; --line:#33312e; --track:#2c2a27; --accent:#f06a42}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 20px 80px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.logo{width:34px;height:34px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink);font-weight:700}
+h1{font-size:20px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px}
+.addrow{display:flex;gap:10px}
+input[type=text],input[type=password],input[type=number],select{
+  width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);padding:10px 16px}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;white-space:nowrap}
+button.primary:hover{filter:brightness(1.07)}
+button.small{padding:6px 11px;font-size:13px}
+button.danger{color:var(--err)}
+.tabs{display:flex;gap:4px;margin:26px 0 16px;border-bottom:1px solid var(--line)}
+.tab{border:none;background:none;border-radius:0;padding:10px 14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+.badge{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-size:12px;text-align:center;margin-left:6px}
+.banner{background:color-mix(in srgb,var(--accent) 12%,var(--surface));border:1px solid var(--accent);border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.hide{display:none!important}
+.job{margin-bottom:12px}
+.jobtop{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.jobtitle{font-weight:600;overflow-wrap:anywhere}
+.meta{color:var(--muted);font-size:13px}
+.pill{font-size:12px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.running{color:var(--accent);border-color:var(--accent)}
+.pill.done{color:var(--ok);border-color:var(--ok)}
+.pill.error{color:var(--err);border-color:var(--err)}
+.bar{height:6px;background:var(--track);border-radius:4px;margin:12px 0 6px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);transition:width .5s}
+.err{color:var(--err);font-size:13px;margin-top:8px;overflow-wrap:anywhere}
+details{margin-top:8px;font-size:12px;color:var(--muted)}
+details pre{white-space:pre-wrap;margin:6px 0 0;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.group{margin-bottom:34px}
+.grouphead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:12px}
+.grouphead h3{margin:0;font-size:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+.clip{padding:0;overflow:hidden;display:flex;flex-direction:column}
+.clip video{width:100%;aspect-ratio:9/16;background:#000;display:block}
+.clipbody{padding:12px 14px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.cliptitle{font-weight:600;line-height:1.3}
+.score{font-size:12px;font-weight:700;color:var(--accent)}
+.hook,.reason{font-size:13px;color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:48px 12px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{margin-bottom:14px}
+label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+.hint{font-size:12px;color:var(--muted);margin-top:4px}
+h2{font-size:15px;margin:22px 0 12px}
+h2:first-child{margin-top:0}
+.chk{display:flex;gap:8px;align-items:center;font-weight:400}
+.chk input{width:auto}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.show{opacity:1}
+@media(max-width:560px){.addrow,.row{display:block}.addrow button{width:100%;margin-top:10px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">▶</div>
+    <div><h1>Podcast Clipper</h1><div class="sub">Z dlouhých podcastů automaticky krátká videa pro TikTok, Shorts a Reels</div></div>
+  </header>
+
+  <div id="keybanner" class="banner hide">
+    <span><b>Ještě chybí API klíč Claude.</b> Bez něj aplikace nedokáže vybírat nejlepší momenty.</span>
+    <button class="primary small" onclick="showTab('settings')">Vložit klíč</button>
+  </div>
+
+  <div class="card">
+    <label for="url">Odkaz na YouTube video</label>
+    <div class="addrow">
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+      <button class="primary" onclick="addJob()">Vytvořit klipy</button>
+    </div>
+    <div class="hint">Zpracování dlouhého dílu trvá obvykle od několika minut po desítky minut, podle výkonu počítače.</div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="clips" onclick="showTab('clips')">Klipy</button>
+    <button class="tab" data-tab="queue" onclick="showTab('queue')">Fronta<span id="qbadge" class="badge hide">0</span></button>
+    <button class="tab" data-tab="channels" onclick="showTab('channels')">Kanály</button>
+    <button class="tab" data-tab="settings" onclick="showTab('settings')">Nastavení</button>
+  </nav>
+
+  <section id="tab-clips"></section>
+  <section id="tab-queue" class="hide"></section>
+
+  <section id="tab-channels" class="hide">
+    <div class="card" style="margin-bottom:18px">
+      <h2>Sledovat kanál</h2>
+      <div class="addrow">
+        <input id="churl" type="text" placeholder="https://www.youtube.com/@nazevkanalu">
+        <select id="chback" style="max-width:230px">
+          <option value="0">Jen nová videa</option>
+          <option value="1">Zpracovat i poslední video</option>
+          <option value="3">Zpracovat i poslední 3</option>
+          <option value="5">Zpracovat i poslední 5</option>
+        </select>
+        <button class="primary" onclick="addChannel()">Přidat</button>
+      </div>
+      <div class="hint">Aplikace kanál pravidelně kontroluje a z každého nového dílu sama vytvoří klipy. Musí zůstat spuštěná.</div>
+    </div>
+    <div id="chlist"></div>
+  </section>
+
+  <section id="tab-settings" class="hide">
+    <div class="card">
+      <h2>Claude</h2>
+      <div class="field">
+        <label for="s_key">API klíč</label>
+        <input id="s_key" type="password" placeholder="sk-ant-…" autocomplete="off">
+        <div class="hint" id="keyhint">Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.</div>
+      </div>
+
+      <h2>Přepis řeči</h2>
+      <div class="row">
+        <div class="field"><label for="s_language">Jazyk podcastu</label>
+          <select id="s_language"><option value="cs">Čeština</option><option value="sk">Slovenština</option><option value="en">Angličtina</option><option value="de">Němčina</option><option value="pl">Polština</option><option value="auto">Automaticky</option></select></div>
+        <div class="field"><label for="s_whisper_model">Přesnost přepisu</label>
+          <select id="s_whisper_model"><option value="large-v3">Nejvyšší (large-v3) – potřebuje grafickou kartu</option><option value="medium">Vysoká (medium)</option><option value="small">Střední (small) – rychlé na běžném PC</option><option value="base">Nízká (base)</option></select>
+          <div class="hint">Bez grafické karty zvol „small“ nebo „medium“.</div></div>
+      </div>
+
+      <h2>Klipy</h2>
+      <div class="row">
+        <div class="field"><label for="s_clips_per_video">Počet klipů z jednoho dílu</label><input id="s_clips_per_video" type="number" min="1" max="20"></div>
+        <div class="field"><label for="s_check_interval_min">Kontrola kanálů (minuty)</label><input id="s_check_interval_min" type="number" min="5"></div>
+        <div class="field"><label for="s_min_clip_seconds">Nejkratší klip (s)</label><input id="s_min_clip_seconds" type="number" min="10"></div>
+        <div class="field"><label for="s_max_clip_seconds">Nejdelší klip (s)</label><input id="s_max_clip_seconds" type="number" min="15"></div>
+      </div>
+      <label class="chk"><input id="s_keep_source" type="checkbox"> Ponechat stažené původní video (zabírá místo)</label>
+
+      <h2>Titulky</h2>
+      <div class="row">
+        <div class="field"><label for="s_size">Velikost</label><input id="s_size" type="number" min="30" max="140"></div>
+        <div class="field"><label for="s_color">Barva zvýrazněného slova</label><input id="s_color" type="text" placeholder="FFD400"></div>
+        <div class="field"><label for="s_words">Slov na řádek</label><input id="s_words" type="number" min="1" max="8"></div>
+      </div>
+      <label class="chk"><input id="s_upper" type="checkbox"> Velká písmena</label>
+
+      <div class="actions" style="margin-top:22px"><button class="primary" onclick="saveSettings()">Uložit nastavení</button></div>
+    </div>
+  </section>
+
+  <footer style="margin-top:40px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <span class="meta">Zavřením tohoto okna se aplikace nevypne, běží dál na pozadí (kvůli sledování kanálů).</span>
+    <button class="small" onclick="quitApp()">Ukončit aplikaci</button>
+  </footer>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let state = null, tab = "clips", lastDone = -1, settingsLoaded = false;
+
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2600); }
+async function api(path, method="GET", body){
+  const r = await fetch(path,{method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+  let data={}; try{ data=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(data.error || "Něco se nepovedlo.");
+  return data;
+}
+function showTab(t){
+  tab=t;
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===t));
+  ["clips","queue","channels","settings"].forEach(n=>$("tab-"+n).classList.toggle("hide",n!==t));
+  if(t==="clips") loadClips();
+  if(t==="settings") fillSettings(true);
+}
+
+async function addJob(){
+  const url=$("url").value.trim(); if(!url) return;
+  try{ await api("/api/jobs","POST",{url}); $("url").value=""; toast("Přidáno do fronty"); showTab("queue"); refresh(); }
+  catch(e){ toast(e.message); }
+}
+$("url").addEventListener("keydown",e=>{ if(e.key==="Enter") addJob(); });
+
+function renderQueue(){
+  const jobs=state.jobs;
+  $("tab-queue").innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="card job">
+      <div class="jobtop">
+        <div><div class="jobtitle">${esc(j.title)}</div><div class="meta">${esc(j.source)}</div></div>
+        <span class="pill ${j.status}">${{queued:"Ve frontě",running:"Běží",done:"Hotovo",error:"Chyba"}[j.status]||j.status}</span>
+      </div>
+      ${j.status==="running"||j.status==="queued"?`<div class="bar"><i style="width:${j.pct}%"></i></div><div class="meta">${esc(j.stage)}</div>`:""}
+      ${j.status==="done"?`<div class="meta" style="margin-top:8px">Vytvořeno klipů: ${j.clips}</div>`:""}
+      ${j.error?`<div class="err">${esc(j.error)}</div>`:""}
+      ${j.log.length?`<details><summary>Podrobnosti</summary><pre>${esc(j.log.join("\n"))}</pre></details>`:""}
+      <div class="actions">
+        ${j.status==="error"?`<button class="small" onclick="retry('${j.id}')">Zkusit znovu</button>`:""}
+        ${j.status!=="running"?`<button class="small danger" onclick="delJob('${j.id}')">Odebrat</button>`:""}
+      </div>
+    </div>`).join("") : `<div class="empty">Zatím žádné úlohy. Vlož odkaz na video nahoře.</div>`;
+}
+async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); refresh(); }
+async function delJob(id){ await api(`/api/jobs/${id}`,"DELETE"); refresh(); }
+
+async function loadClips(){
+  const items = await api("/api/outputs");
+  if(!items.length){ $("tab-clips").innerHTML=`<div class="empty">Tady se objeví hotové klipy.<br>Vlož odkaz na podcast nahoře a spusť zpracování.</div>`; return; }
+  $("tab-clips").innerHTML = `<div class="actions" style="margin:0 0 16px"><button class="small" onclick="openFolder()">Otevřít složku s klipy</button></div>` +
+  items.map(v=>`
+    <div class="group">
+      <div class="grouphead"><h3>${esc(v.video)}</h3>
+        <button class="small danger" onclick="delOutput('${esc(v.id)}')">Smazat</button></div>
+      <div class="grid">${v.clips.map(c=>`
+        <div class="card clip">
+          <video controls preload="metadata" src="/media/${esc(v.id)}/${encodeURIComponent(c.file)}#t=0.1"></video>
+          <div class="clipbody">
+            <div class="score">Skóre ${esc(c.score)}</div>
+            <div class="cliptitle">${esc(c.title)}</div>
+            <div class="hook">${esc(c.hook)}</div>
+            <div class="reason">${esc(c.reason)}</div>
+            <div class="actions" style="margin-top:auto">
+              <a href="/media/${esc(v.id)}/${encodeURIComponent(c.file)}?dl=1"><button class="small primary">Stáhnout</button></a>
+              <button class="small" onclick="copyText(${esc(JSON.stringify(c.title))})">Kopírovat název</button>
+            </div>
+          </div>
+        </div>`).join("")}</div>
+    </div>`).join("");
+}
+async function delOutput(id){ if(!confirm("Smazat všechny klipy z tohoto videa?")) return; await api("/api/outputs/"+id,"DELETE"); loadClips(); }
+async function openFolder(){ try{ const r=await api("/api/open-folder","POST"); toast("Složka otevřena"); }catch(e){ toast(e.message); } }
+async function quitApp(){
+  const busy = state && state.jobs.some(j=>j.status==="running"||j.status==="queued");
+  if(!confirm(busy ? "Právě se zpracovává video. Opravdu aplikaci ukončit? Rozpracované klipy se ztratí." : "Ukončit aplikaci? Přestanou se kontrolovat sledované kanály.")) return;
+  try{ await api("/api/quit","POST"); }catch(e){}
+  document.body.innerHTML = '<div style="text-align:center;padding:90px 20px;font:16px system-ui">Aplikace je ukončená. Toto okno můžete zavřít.</div>';
+}
+function copyText(t){ navigator.clipboard.writeText(t).then(()=>toast("Zkopírováno")); }
+
+function renderChannels(){
+  const chs=state.channels;
+  $("chlist").innerHTML = chs.length ? chs.map(c=>`
+    <div class="card job">
+      <div class="jobtop">
+        <div><div class="jobtitle">${esc(c.name)}</div>
+          <div class="meta">${c.last_check?"Naposledy zkontrolováno "+new Date(c.last_check*1000).toLocaleString("cs-CZ"):"Zatím nezkontrolováno"}</div></div>
+        <span class="pill ${c.enabled?"running":""}">${c.enabled?"Sleduje se":"Pozastaveno"}</span>
+      </div>
+      ${c.error?`<div class="err">${esc(c.error)}</div>`:""}
+      <div class="actions">
+        <button class="small" onclick='toggleCh(${JSON.stringify(c.url)})'>${c.enabled?"Pozastavit":"Obnovit"}</button>
+        <button class="small danger" onclick='delCh(${JSON.stringify(c.url)})'>Odebrat</button>
+      </div>
+    </div>`).join("") + `<button class="small" onclick="checkNow()">Zkontrolovat teď</button>`
+    : `<div class="empty">Zatím nesleduješ žádný kanál.</div>`;
+}
+async function addChannel(){
+  const url=$("churl").value.trim(); if(!url) return;
+  toast("Načítám kanál…");
+  try{ await api("/api/channels","POST",{url,backfill:+$("chback").value}); $("churl").value=""; toast("Kanál přidán"); refresh(); }
+  catch(e){ toast(e.message); }
+}
+async function toggleCh(url){ await api("/api/channels/toggle","POST",{url}); refresh(); }
+async function delCh(url){ await api("/api/channels/delete","POST",{url}); refresh(); }
+async function checkNow(){ await api("/api/channels/check","POST"); toast("Kontroluji…"); setTimeout(refresh,2500); }
+
+function fillSettings(force){
+  if(!state || (settingsLoaded && !force)) return;
+  const d=state.defaults, s=state.settings, sub=d.subtitles;
+  const v=(k)=>s[k] ?? d[k];
+  $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
+  $("s_clips_per_video").value=v("clips_per_video"); $("s_min_clip_seconds").value=v("min_clip_seconds");
+  $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
+  $("s_keep_source").checked=!!v("keep_source");
+  $("s_size").value=sub.size; $("s_color").value=sub.highlight_color;
+  $("s_words").value=sub.words_per_line; $("s_upper").checked=!!sub.uppercase;
+  $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
+  settingsLoaded=true;
+}
+async function saveSettings(){
+  const body={
+    language:$("s_language").value, whisper_model:$("s_whisper_model").value,
+    clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
+    max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
+    keep_source:$("s_keep_source").checked,
+    subtitles:{size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked}
+  };
+  const key=$("s_key").value.trim(); if(key) body.api_key=key;
+  try{ await api("/api/settings","POST",body); $("s_key").value=""; toast("Nastavení uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }
+  catch(e){ toast(e.message); }
+}
+
+async function refresh(){
+  try{ state=await api("/api/state"); }catch(e){ return; }
+  $("keybanner").classList.toggle("hide",state.has_api_key);
+  const active=state.jobs.filter(j=>j.status==="running"||j.status==="queued").length;
+  $("qbadge").textContent=active; $("qbadge").classList.toggle("hide",!active);
+  renderQueue(); renderChannels(); fillSettings(false);
+  const done=state.jobs.filter(j=>j.status==="done").length;
+  if(lastDone!==-1 && done!==lastDone && tab==="clips") loadClips();
+  lastDone=done;
+  setTimeout(refresh, active?2000:6000);
+}
+refresh(); loadClips();
+</script>
+</body>
+</html>

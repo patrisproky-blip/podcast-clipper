@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+build/
+dist/
+build_bin/
+settings.json
+jobs.json
+channels.json
+Klipy/
+work/
+app.log
+selftest.log

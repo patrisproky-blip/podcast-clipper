@@ -1,0 +1,20 @@
+# Podcast Clipper – výchozí nastavení (v aplikaci se mění v záložce Nastavení).
+# Co tu není, bere se z výchozích hodnot v config.py.
+
+language: cs                 # jazyk podcastu ("cs", "en", ... nebo "auto")
+whisper_model: small         # "medium" je přesnější; "large-v3" je nejlepší, ale potřebuje grafickou kartu
+whisper_device: auto         # "auto", "cuda" nebo "cpu"
+
+claude_model: claude-sonnet-5-5
+clips_per_video: 6           # kolik klipů z jednoho dílu
+min_clip_seconds: 25
+max_clip_seconds: 75
+
+min_video_minutes: 10        # kratší videa kanálu se přeskočí
+keep_source: false           # true = nemazat stažené původní video
+
+subtitles:
+  size: 78
+  uppercase: false
+  words_per_line: 3
+  highlight_color: "FFD400"  # barva právě vyslovovaného slova (RGB hex)
