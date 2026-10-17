@@ -22,6 +22,9 @@ jobs:
             label: macOS
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +38,12 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller imageio-ffmpeg
 
       - name: Sestavení aplikace
-        run: python build.py
+        shell: bash
+        run: |
+          status=0
+          python build.py > build.log 2>&1 || status=$?
+          tail -n 60 build.log
+          exit $status
 
       - name: Samotest aplikace (Windows)
         if: runner.os == 'Windows'
@@ -67,6 +75,19 @@ jobs:
           name: PodcastClipper-${{ matrix.label }}
           path: PodcastClipper-*.zip
           retention-days: 30
+
+      - name: Zapsat log při chybě
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '```'; tail -n 70 build.log 2>/dev/null; echo '```'
+            echo; echo 'selftest.log:'; echo '```'; cat "$HOME/PodcastClipper/selftest.log" 2>/dev/null; echo '```'
+          } > notes.txt
+          gh release create "buildlog-${{ github.run_number }}-${{ matrix.label }}" --prerelease \
+            --title "Log chyby (${{ matrix.label }}, sestavení ${{ github.run_number }})" --notes-file notes.txt
 
   release:
     needs: build

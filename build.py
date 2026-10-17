@@ -15,11 +15,18 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001
+    pass
+
 ROOT = Path(__file__).parent.resolve()
 BUILD_BIN = ROOT / "build_bin"
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 NAME = "PodcastClipper"
+REQUIRED = {"faster_whisper", "ctranslate2", "yt_dlp", "yt_dlp_ejs", "anthropic"}
 
 
 def make_executable(p):
@@ -35,7 +42,7 @@ def prepare_ffmpeg():
     make_executable(dst)
     enc = subprocess.run([str(dst), "-hide_banner", "-encoders"], capture_output=True, text=True, check=True).stdout
     if "libx264" not in enc or " aac " not in enc:
-        sys.exit("Přibalený ffmpeg nemá potřebné kodeky (libx264, aac).")
+        sys.exit("Bundled ffmpeg lacks required codecs (libx264, aac).")
     print(f"ffmpeg: {src.name} -> {dst}")
 
 
@@ -49,7 +56,7 @@ def prepare_deno():
     else:
         target = "x86_64-unknown-linux-gnu"
     url = f"https://github.com/denoland/deno/releases/latest/download/deno-{target}.zip"
-    print("Stahuji deno:", url)
+    print("Downloading deno:", url)
     with urllib.request.urlopen(url, timeout=120) as r:
         data = r.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -84,15 +91,17 @@ def main():
                 "anthropic", "certifi"):
         if has(mod):
             args += ["--collect-all", mod]
+        elif mod in REQUIRED:
+            sys.exit(f"Required package {mod} is not installed.")
         else:
-            print(f"Upozornění: balíček {mod} není nainstalovaný, přeskakuji.")
+            print(f"Warning: package {mod} is not installed, skipping.")
     if IS_MAC:
         args += ["--osx-bundle-identifier", "cz.podcastclipper.app"]
 
     import PyInstaller.__main__
 
     PyInstaller.__main__.run(args)
-    print("Hotovo:", ROOT / "dist")
+    print("Done:", ROOT / "dist")
 
 
 if __name__ == "__main__":

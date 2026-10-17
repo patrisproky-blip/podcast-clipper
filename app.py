@@ -478,7 +478,8 @@ def selftest():
 
     def t_ytdlp():
         import yt_dlp
-        return yt_dlp.version.__version__
+        import yt_dlp_ejs  # řešení výzev YouTube; bez něj stahování nefunguje
+        return f"{yt_dlp.version.__version__}, ejs {getattr(yt_dlp_ejs, '__version__', 'ok')}"
 
     def t_whisper():
         import faster_whisper
