@@ -1,4 +1,4 @@
-"""Celý postup pro jedno video: stažení -> přepis -> výběr momentů -> render."""
+"""Postup pro jedno video: příprava (stažení + přepis) -> výběr momentů -> vytvoření klipů."""
 import json
 import re
 import unicodedata
@@ -16,13 +16,24 @@ def slugify(text, maxlen=50):
     return text[:maxlen] or "klip"
 
 
-def process_video(url, cfg, log=print, progress=None):
-    """progress(pct, stage, **extra) – volitelné hlášení průběhu pro aplikaci."""
-
+def _prog(progress):
     def prog(pct, stage, **extra):
         if progress:
             progress(pct, stage, **extra)
+    return prog
 
+
+def transcript_path(cfg, vid):
+    return Path(cfg["work_dir"]) / f"{vid}.transcript.json"
+
+
+def load_transcript(cfg, vid):
+    return json.loads(transcript_path(cfg, vid).read_text(encoding="utf-8"))
+
+
+def prepare_video(url, cfg, log=print, progress=None):
+    """Stáhne video a přepíše řeč. Vrátí (info, transcript)."""
+    prog = _prog(progress)
     work = Path(cfg["work_dir"])
     log(f"Stahuji: {url}")
     prog(3, "Stahuji video")
@@ -36,17 +47,18 @@ def process_video(url, cfg, log=print, progress=None):
 
     log("Přepisuji řeč (první spuštění stáhne model Whisper)...")
     transcript = transcribe(
-        info["path"], cfg, work / f"{vid}.transcript.json",
+        info["path"], cfg, transcript_path(cfg, vid),
         progress=lambda f: prog(15 + int(40 * f), "Přepisuji řeč"),
     )
+    return info, transcript
 
-    log("Claude vybírá nejlepší momenty...")
-    prog(55, "Claude vybírá nejlepší momenty")
-    clips = select_moments(transcript, cfg)
-    if not clips:
-        log("Nenalezeny žádné vhodné momenty.")
-        prog(100, "Hotovo (žádné vhodné momenty)")
-        return []
+
+def render_clips(info, transcript, clips, cfg, log=print, progress=None):
+    """Z vybraných momentů vytvoří hotové klipy a zapíše clips.json."""
+    prog = _prog(progress)
+    vid = info["id"]
+    if not Path(info["path"]).exists():
+        raise FileNotFoundError("Stažené video už neexistuje. Smažte tuto úlohu a zadejte video znovu.")
 
     out_dir = Path(cfg["output_dir"]) / f"{vid}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +68,7 @@ def process_video(url, cfg, log=print, progress=None):
     for i, clip in enumerate(clips, 1):
         name = f"{i:02d}_{slugify(clip['title'])}.mp4"
         log(f"Renderuji {i}/{len(clips)}: {clip['title']} ({clip['start']:.0f}–{clip['end']:.0f} s)")
-        prog(65 + int(33 * (i - 1) / len(clips)), f"Renderuji klip {i} z {len(clips)}")
+        prog(65 + int(33 * (i - 1) / len(clips)), f"Vytvářím klip {i} z {len(clips)}")
         layout = render_clip(info["path"], clip, words, cfg, out_dir / name)
         results.append({
             **clip,
@@ -76,3 +88,18 @@ def process_video(url, cfg, log=print, progress=None):
     log(f"Hotovo, klipy jsou v: {out_dir}")
     prog(100, "Hotovo")
     return results
+
+
+def process_video(url, cfg, log=print, progress=None):
+    """Celý automatický postup (výběr momentů přes Claude API)."""
+    prog = _prog(progress)
+    info, transcript = prepare_video(url, cfg, log, progress)
+
+    log("Claude vybírá nejlepší momenty...")
+    prog(55, "Claude vybírá nejlepší momenty")
+    clips = select_moments(transcript, cfg)
+    if not clips:
+        log("Nenalezeny žádné vhodné momenty.")
+        prog(100, "Hotovo (žádné vhodné momenty)")
+        return []
+    return render_clips(info, transcript, clips, cfg, log, progress)

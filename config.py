@@ -6,8 +6,9 @@ import yaml
 DEFAULTS = {
     "language": "cs",              # "cs", "en", ... nebo "auto"
     "whisper_model": "small",      # "large-v3" je nejpřesnější, ale bez grafické karty velmi pomalý
-    "whisper_device": "auto",      # "auto", "cuda", "cpu"
-    "whisper_compute_type": "auto",
+    "whisper_device": "cpu",       # sestavená aplikace neobsahuje ovladače grafické karty
+    "whisper_compute_type": "int8",
+    "selection_mode": "manual",    # "manual" = ručně přes chat Claude (zdarma), "api" = automaticky přes API
     "claude_model": "claude-sonnet-5-5",
     "clips_per_video": 6,
     "min_clip_seconds": 25,

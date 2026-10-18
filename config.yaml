@@ -3,8 +3,9 @@
 
 language: cs                 # jazyk podcastu ("cs", "en", ... nebo "auto")
 whisper_model: small         # "medium" je přesnější; "large-v3" je nejlepší, ale potřebuje grafickou kartu
-whisper_device: auto         # "auto", "cuda" nebo "cpu"
+whisper_device: cpu          # sestavená aplikace běží na procesoru
 
+selection_mode: manual       # manual = ručně přes chat Claude (zdarma), api = automaticky přes API klíč
 claude_model: claude-sonnet-5-5
 clips_per_video: 6           # kolik klipů z jednoho dílu
 min_clip_seconds: 25

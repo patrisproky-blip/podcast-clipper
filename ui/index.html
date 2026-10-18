@@ -42,6 +42,7 @@ button.danger{color:var(--err)}
 .meta{color:var(--muted);font-size:13px}
 .pill{font-size:12px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .pill.running{color:var(--accent);border-color:var(--accent)}
+.pill.waiting{color:#b7791f;border-color:#b7791f}
 .pill.done{color:var(--ok);border-color:var(--ok)}
 .pill.error{color:var(--err);border-color:var(--err)}
 .bar{height:6px;background:var(--track);border-radius:4px;margin:12px 0 6px;overflow:hidden}
@@ -71,6 +72,11 @@ h2:first-child{margin-top:0}
 .chk input{width:auto}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .25s}
 #toast.show{opacity:1}
+.wait{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+.wait ol{margin:6px 0 12px;padding-left:20px;font-size:14px}
+.part{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg)}
+.part textarea{width:100%;min-height:90px;margin-top:8px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+a{color:var(--accent)}
 @media(max-width:560px){.addrow,.row{display:block}.addrow button{width:100%;margin-top:10px}}
 </style>
 </head>
@@ -82,7 +88,7 @@ h2:first-child{margin-top:0}
   </header>
 
   <div id="keybanner" class="banner hide">
-    <span><b>Ještě chybí API klíč Claude.</b> Bez něj aplikace nedokáže vybírat nejlepší momenty.</span>
+    <span><b>Ještě chybí API klíč Claude.</b> Máte zapnutý automatický výběr, který ho potřebuje. Nebo přepněte na ruční výběr zdarma.</span>
     <button class="primary small" onclick="showTab('settings')">Vložit klíč</button>
   </div>
 
@@ -125,8 +131,16 @@ h2:first-child{margin-top:0}
 
   <section id="tab-settings" class="hide">
     <div class="card">
-      <h2>Claude</h2>
+      <h2>Výběr momentů</h2>
       <div class="field">
+        <label for="s_selection_mode">Jak se vybírají nejlepší momenty</label>
+        <select id="s_selection_mode">
+          <option value="manual">Ručně přes chat Claude (zdarma)</option>
+          <option value="api">Automaticky přes API klíč (placené podle spotřeby)</option>
+        </select>
+        <div class="hint">Ručně: aplikace připraví text, vy ho vložíte do chatu na claude.ai a odpověď vložíte zpět. Automaticky: vše proběhne samo, ale API klíč vyžaduje předplacený kredit u Anthropic.</div>
+      </div>
+      <div class="field" id="keyfield">
         <label for="s_key">API klíč</label>
         <input id="s_key" type="password" placeholder="sk-ant-…" autocomplete="off">
         <div class="hint" id="keyhint">Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.</div>
@@ -196,15 +210,48 @@ async function addJob(){
 }
 $("url").addEventListener("keydown",e=>{ if(e.key==="Enter") addJob(); });
 
+const drafts = {}, promptCache = {};
+let queueSig = "";
+const PILL = {queued:"Ve frontě",running:"Běží",waiting:"Čeká na vás",done:"Hotovo",error:"Chyba"};
+
+function waitPanel(j){
+  const parts = promptCache[j.id];
+  const many = j.parts > 1;
+  let h = `<div class="wait"><b>Teď je řada na vás (trvá asi minutu):</b>
+    <ol>
+      <li>Otevřete <a href="https://claude.ai/new" target="_blank" rel="noopener">claude.ai</a> (nový chat, stačí bezplatný účet).</li>
+      <li>Klikněte na <i>Kopírovat pokyny</i> a vložte je do chatu.${many?" Video je dlouhé, proto je pokynů více. Každé vložte do <b>nového chatu</b>.":""}</li>
+      <li>Odpověď od Claude (blok s kódem) zkopírujte a vložte do pole pod pokyny.</li>
+      <li>Klikněte na <i>Vytvořit klipy</i>.</li>
+    </ol>`;
+  if(!parts){ return h + `<div class="meta">Načítám pokyny…</div></div>`; }
+  h += parts.map((p,i)=>`
+    <div class="part">
+      <div class="jobtop"><span><b>${many?`Část ${i+1} z ${parts.length}`:"Pokyny pro Claude"}</b> <span class="meta">(${esc(p.label)}, ${p.words} slov)</span></span>
+      <button class="small" onclick="copyPrompt('${j.id}',${i})">Kopírovat pokyny</button></div>
+      <textarea data-job="${j.id}" data-i="${i}" placeholder="Sem vložte odpověď od Claude…">${esc((drafts[j.id]||[])[i]||"")}</textarea>
+    </div>`).join("");
+  h += `<div class="actions"><button class="primary" onclick="sendAnswers('${j.id}')">Vytvořit klipy</button></div></div>`;
+  return h;
+}
 function renderQueue(){
   const jobs=state.jobs;
+  jobs.filter(j=>j.status==="waiting" && !promptCache[j.id]).forEach(async j=>{
+    try{ promptCache[j.id]=(await api(`/api/jobs/${j.id}/prompts`)).parts; queueSig=""; renderQueue(); }catch(e){}
+  });
+  const sig=JSON.stringify([jobs, jobs.map(j=>!!promptCache[j.id])]);
+  if(sig===queueSig) return;
+  const el=document.activeElement;
+  if(el && el.tagName==="TEXTAREA" && $("tab-queue").contains(el)) return; // nepřepisovat, když uživatel píše
+  queueSig=sig;
   $("tab-queue").innerHTML = jobs.length ? jobs.map(j=>`
     <div class="card job">
       <div class="jobtop">
         <div><div class="jobtitle">${esc(j.title)}</div><div class="meta">${esc(j.source)}</div></div>
-        <span class="pill ${j.status}">${{queued:"Ve frontě",running:"Běží",done:"Hotovo",error:"Chyba"}[j.status]||j.status}</span>
+        <span class="pill ${j.status}">${PILL[j.status]||j.status}</span>
       </div>
       ${j.status==="running"||j.status==="queued"?`<div class="bar"><i style="width:${j.pct}%"></i></div><div class="meta">${esc(j.stage)}</div>`:""}
+      ${j.status==="waiting"?waitPanel(j):""}
       ${j.status==="done"?`<div class="meta" style="margin-top:8px">Vytvořeno klipů: ${j.clips}</div>`:""}
       ${j.error?`<div class="err">${esc(j.error)}</div>`:""}
       ${j.log.length?`<details><summary>Podrobnosti</summary><pre>${esc(j.log.join("\n"))}</pre></details>`:""}
@@ -214,8 +261,23 @@ function renderQueue(){
       </div>
     </div>`).join("") : `<div class="empty">Zatím žádné úlohy. Vlož odkaz na video nahoře.</div>`;
 }
-async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); refresh(); }
-async function delJob(id){ await api(`/api/jobs/${id}`,"DELETE"); refresh(); }
+document.addEventListener("input",e=>{
+  const t=e.target;
+  if(t.tagName==="TEXTAREA" && t.dataset.job){ (drafts[t.dataset.job] ||= [])[+t.dataset.i]=t.value; }
+});
+function copyPrompt(id,i){
+  const p=(promptCache[id]||[])[i]; if(!p) return;
+  navigator.clipboard.writeText(p.prompt).then(()=>toast("Pokyny zkopírovány. Vložte je do chatu s Claude."),
+    ()=>toast("Kopírování se nepovedlo. Povolte přístup ke schránce."));
+}
+async function sendAnswers(id){
+  const n=(promptCache[id]||[]).length;
+  const answers=Array.from({length:n},(_,i)=>(drafts[id]||[])[i]||"");
+  try{ const r=await api(`/api/jobs/${id}/answers`,"POST",{answers}); toast(`Vybráno ${r.clips} klipů, vytvářím…`); delete drafts[id]; queueSig=""; refresh(); }
+  catch(e){ alert(e.message); }
+}
+async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); queueSig=""; refresh(); }
+async function delJob(id){ if(state.jobs.find(j=>j.id===id)?.status==="waiting" && !confirm("Odebrat úlohu? Stažené video a přepis se smažou.")) return; await api(`/api/jobs/${id}`,"DELETE"); delete drafts[id]; delete promptCache[id]; queueSig=""; refresh(); }
 
 async function loadClips(){
   const items = await api("/api/outputs");
@@ -282,7 +344,7 @@ function fillSettings(force){
   if(!state || (settingsLoaded && !force)) return;
   const d=state.defaults, s=state.settings, sub=d.subtitles;
   const v=(k)=>s[k] ?? d[k];
-  $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
+  $("s_selection_mode").value=v("selection_mode")||"manual"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
   $("s_clips_per_video").value=v("clips_per_video"); $("s_min_clip_seconds").value=v("min_clip_seconds");
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
   $("s_keep_source").checked=!!v("keep_source");
@@ -293,7 +355,7 @@ function fillSettings(force){
 }
 async function saveSettings(){
   const body={
-    language:$("s_language").value, whisper_model:$("s_whisper_model").value,
+    selection_mode:$("s_selection_mode").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value,
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
     keep_source:$("s_keep_source").checked,
@@ -306,15 +368,17 @@ async function saveSettings(){
 
 async function refresh(){
   try{ state=await api("/api/state"); }catch(e){ return; }
-  $("keybanner").classList.toggle("hide",state.has_api_key);
+  $("keybanner").classList.toggle("hide",state.has_api_key||state.selection_mode!=="api");
   const active=state.jobs.filter(j=>j.status==="running"||j.status==="queued").length;
-  $("qbadge").textContent=active; $("qbadge").classList.toggle("hide",!active);
+  const waiting=state.jobs.filter(j=>j.status==="waiting").length;
+  $("qbadge").textContent=active+waiting; $("qbadge").classList.toggle("hide",!(active+waiting));
   renderQueue(); renderChannels(); fillSettings(false);
   const done=state.jobs.filter(j=>j.status==="done").length;
   if(lastDone!==-1 && done!==lastDone && tab==="clips") loadClips();
   lastDone=done;
   setTimeout(refresh, active?2000:6000);
 }
+$("s_selection_mode").addEventListener("change",()=>$("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"));
 refresh(); loadClips();
 </script>
 </body>

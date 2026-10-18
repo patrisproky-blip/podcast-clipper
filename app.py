@@ -22,7 +22,8 @@ from flask import Flask, abort, jsonify, request, send_from_directory
 
 import config
 from downloader import list_channel_videos
-from pipeline import process_video
+from pipeline import load_transcript, prepare_video, process_video, render_clips
+from selector import build_prompts, finalize, parse_answer
 from platform_utils import FROZEN, data_dir, redirect_output_when_windowed, resource, setup_environment
 
 DATA = data_dir()  # ~/PodcastClipper jako aplikace, složka projektu ze zdrojáků
@@ -39,7 +40,7 @@ app = Flask(__name__)
 # ----------------------------------------------------------------- nastavení
 
 INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min")
-STR_KEYS = ("language", "whisper_model", "whisper_device")
+STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode")
 
 
 def load_settings():
@@ -75,6 +76,8 @@ def build_cfg():
     if "keep_source" in s:
         cfg["keep_source"] = bool(s["keep_source"])
     cfg["subtitles"].update(s.get("subtitles", {}))
+    if cfg.get("selection_mode") not in ("manual", "api"):
+        cfg["selection_mode"] = "manual"
     if s.get("api_key"):
         os.environ["ANTHROPIC_API_KEY"] = s["api_key"]
     return cfg
@@ -89,15 +92,29 @@ jobs_lock = threading.Lock()
 
 
 def _persist_jobs():
-    done = [jobs[i] for i in job_order if jobs[i]["status"] in ("done", "error")]
-    slim = [{k: v for k, v in j.items() if k != "log"} | {"log": j["log"][-30:]} for j in done[-100:]]
-    JOBS_FILE.write_text(json.dumps(slim, ensure_ascii=False), encoding="utf-8")
+    keep = []
+    for i in job_order:
+        j = jobs.get(i)
+        if not j:
+            continue
+        resumable = j["status"] in ("queued", "running") and j.get("phase") == "render"
+        if j["status"] not in ("done", "error", "waiting") and not resumable:
+            continue
+        d = {k: v for k, v in j.items() if k != "log"}
+        d["log"] = j["log"][-30:]
+        if j["status"] != "waiting":
+            d.pop("prompts", None)
+        keep.append(d)
+    JOBS_FILE.write_text(json.dumps(keep[-100:], ensure_ascii=False), encoding="utf-8")
 
 
 def _load_jobs():
     if JOBS_FILE.exists():
         try:
             for j in json.loads(JOBS_FILE.read_text(encoding="utf-8")):
+                if j.get("status") in ("queued", "running"):
+                    j.update(status="error", stage="Chyba",
+                             error="Zpracování přerušilo ukončení aplikace. Klikněte na Zkusit znovu.")
                 jobs[j["id"]] = j
                 job_order.append(j["id"])
         except (json.JSONDecodeError, KeyError):
@@ -137,10 +154,26 @@ def worker():
                     job[k] = extra[k]
 
         try:
-            if not has_api_key():
-                raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení.")
-            results = process_video(job["url"], build_cfg(), log, progress)
-            job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
+            cfg = build_cfg()
+            if job.get("phase") == "render":
+                # klipy vybrané ručně přes chat: zbývá je vytvořit
+                transcript = load_transcript(cfg, job["info"]["id"])
+                results = render_clips(job["info"], transcript, job.get("pending_clips") or [], cfg, log, progress)
+                job.pop("pending_clips", None)
+                job.pop("prompts", None)
+                job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
+            elif cfg["selection_mode"] == "api":
+                if not has_api_key():
+                    raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení, nebo přepni na ruční výběr.")
+                results = process_video(job["url"], cfg, log, progress)
+                job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
+            else:
+                info, transcript = prepare_video(job["url"], cfg, log, progress)
+                parts = build_prompts(transcript, cfg)
+                if not parts:
+                    raise RuntimeError("V přepisu není žádný text. Video asi neobsahuje řeč.")
+                job.update(info=info, prompts=parts, phase="select", status="waiting", pct=55,
+                           stage="Čeká na vás: výběr momentů přes Claude", title=info["title"], vid=info["id"])
         except Exception as e:  # noqa: BLE001
             job["log"].append(f"{type(e).__name__}: {e}")
             job.update(status="error", stage="Chyba", error=str(e)[:400] or type(e).__name__)
@@ -215,8 +248,14 @@ def watcher_loop():
 YT_RE = re.compile(r"^https?://([\w-]+\.)?(youtube\.com|youtu\.be)/", re.I)
 
 
+_HIDDEN_JOB_KEYS = ("log", "prompts", "pending_clips", "info")
+
+
 def _public_job(j):
-    return {k: v for k, v in j.items() if k != "log"} | {"log": j["log"][-12:]}
+    d = {k: v for k, v in j.items() if k not in _HIDDEN_JOB_KEYS}
+    d["log"] = j["log"][-12:]
+    d["parts"] = len(j.get("prompts") or [])
+    return d
 
 
 @app.get("/")
@@ -229,6 +268,7 @@ def api_state():
     s = load_settings()
     return jsonify({
         "has_api_key": has_api_key(),
+        "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
         "settings": {k: v for k, v in s.items() if k != "api_key"},
@@ -253,6 +293,8 @@ def api_delete_job(jid):
         abort(404)
     if job["status"] == "running":
         return jsonify(error="Běžící úlohu nelze smazat."), 409
+    if job["status"] in ("waiting", "error") and (job.get("info") or {}).get("path"):
+        Path(job["info"]["path"]).unlink(missing_ok=True)  # stažené video zabírá hodně místa
     job["status"] = "cancelled"
     with jobs_lock:
         jobs.pop(jid, None)
@@ -270,6 +312,46 @@ def api_retry_job(jid):
     job.update(status="queued", stage="Čeká ve frontě", pct=0, error=None, log=[])
     job_queue.put(jid)
     return jsonify(ok=True)
+
+
+@app.get("/api/jobs/<jid>/prompts")
+def api_job_prompts(jid):
+    job = jobs.get(jid)
+    if not job or not job.get("prompts"):
+        abort(404)
+    return jsonify(parts=job["prompts"])
+
+
+@app.post("/api/jobs/<jid>/answers")
+def api_job_answers(jid):
+    job = jobs.get(jid)
+    if not job or job["status"] != "waiting":
+        abort(404)
+    answers = (request.json or {}).get("answers") or []
+    candidates, problems = [], []
+    for i, text in enumerate(answers[: len(job["prompts"])]):
+        if not str(text or "").strip():
+            continue
+        try:
+            candidates += parse_answer(text)
+        except ValueError as e:
+            problems.append(f"Část {i + 1}: {e}")
+    if problems:
+        return jsonify(error=" ".join(problems)), 400
+    if not candidates:
+        return jsonify(error="Vložte alespoň jednu odpověď od Claude."), 400
+    cfg = build_cfg()
+    clips = finalize(candidates, load_transcript(cfg, job["info"]["id"]), cfg)
+    if not clips:
+        return jsonify(error=(
+            f"Žádný z vybraných momentů nemá vhodnou délku ({cfg['min_clip_seconds']}–{cfg['max_clip_seconds']} s) "
+            "nebo se navzájem překrývají. Požádejte Claude o jiný výběr se správnou délkou.")), 400
+    with jobs_lock:
+        job.update(phase="render", pending_clips=clips, status="queued", pct=60, error=None,
+                   stage="Čeká ve frontě (vytváření klipů)")
+        _persist_jobs()
+    job_queue.put(jid)
+    return jsonify(ok=True, clips=len(clips))
 
 
 @app.post("/api/channels")
@@ -332,6 +414,8 @@ def api_save_settings():
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
         s.pop("api_key", None)
+    if "selection_mode" in data and data["selection_mode"] not in ("manual", "api"):
+        return jsonify(error="Neznámý způsob výběru momentů."), 400
     for k in STR_KEYS:
         if k in data:
             s[k] = str(data[k])
@@ -518,6 +602,19 @@ def selftest():
             segs, info = model.transcribe(str(wav), language="cs", word_timestamps=True, vad_filter=True)
             return f"model tiny funguje, segmentů: {len(list(segs))}"
 
+    def t_manual():
+        import selector
+        segs = [{"start": i * 5.0, "end": i * 5.0 + 4.5, "text": f"věta {i}",
+                 "words": [{"w": "věta", "start": i * 5.0, "end": i * 5.0 + 2.0}]} for i in range(200)]
+        tr = {"segments": segs, "duration": 1000.0}
+        cfg = build_cfg()
+        parts = selector.build_prompts(tr, cfg)
+        assert parts and "PŘEPIS" in parts[0]["prompt"], "pokyny pro chat se nevytvořily"
+        ans = '```json\n{"clips":[{"start":100,"end":150,"title":"T","hook":"h","score":80,"reason":"r"}]}\n```'
+        clips = selector.finalize(selector.parse_answer(ans), tr, cfg)
+        assert len(clips) == 1, "ruční výběr nevrátil klip"
+        return f"{len(parts)} část, {len(clips)} klip"
+
     def t_anthropic():
         import anthropic
         import selector  # noqa: F401
@@ -552,6 +649,7 @@ def selftest():
     check("dekódování zvuku", t_audio)
     check("ONNX runtime (VAD)", t_onnx)
     check("zkušební přepis (model tiny)", t_transcribe, required=False)  # potřebuje internet
+    check("ruční výběr momentů", t_manual)
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
     check("zkušební render klipu", t_render)

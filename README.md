@@ -35,14 +35,17 @@ Poznámka: sestavení pro Mac je pro počítače s čipem Apple (M1 a novější
 
 Po spuštění se otevře prohlížeč s aplikací. Pak:
 
-1. V záložce **Nastavení** vložte API klíč Claude (vytvoříte ho v Anthropic Console, console.anthropic.com).
-2. Vložte odkaz na YouTube video nahoře a klikněte *Vytvořit klipy*.
-3. První přepis stáhne jazykový model (u výchozí „small“ asi 500 MB), proto první video trvá déle.
+1. Vložte odkaz na YouTube video nahoře a klikněte *Vytvořit klipy*.
+2. Aplikace video stáhne a přepíše řeč (první přepis stáhne jazykový model, u výchozí „small“ asi 500 MB, proto první video trvá déle).
+3. Ve **Frontě** se úloha změní na *Čeká na vás*. Klikněte na *Kopírovat pokyny*, vložte je do chatu na claude.ai (stačí bezplatný účet), odpověď od Claude zkopírujte do pole pod pokyny a klikněte *Vytvořit klipy*. U dlouhých dílů je pokynů více, každé patří do nového chatu.
+4. Aplikace klipy vytvoří.
+
+Výběr momentů přes chat je zdarma, ale vyžaduje vaši krátkou práci u každého videa. Sledování celého kanálu proto u každého dílu zastaví v *Čeká na vás*. Chcete-li, aby šlo vše samo, přepněte v *Nastavení* na automatický výběr. Ten potřebuje API klíč z Anthropic Console (console.anthropic.com) s předplaceným kreditem.
 
 ## Jak se používá
 
 - **Klipy:** hotová videa s přehrávačem, názvem, hookem a skóre. Jdou stáhnout.
-- **Fronta:** průběh zpracování. Při chybě je tlačítko *Zkusit znovu*.
+- **Fronta:** průběh zpracování a výběr momentů přes chat. Při chybě je tlačítko *Zkusit znovu*.
 - **Kanály:** přidáte kanál podcastu a aplikace sama zpracuje každý nový díl (musí běžet).
 - **Nastavení:** jazyk, přesnost přepisu, počet a délka klipů, vzhled titulků.
 
@@ -52,11 +55,11 @@ Vaše data (nastavení vč. API klíče, rozpracovaná videa a hotové klipy) js
 
 ## Tipy a omezení
 
-- Bez grafické karty zvolte přesnost „small“ nebo „medium“. „large-v3“ je velmi pomalý.
+- Přepis běží na procesoru. Zvolte přesnost „small“ nebo „medium“, „large-v3“ je velmi pomalý.
 - Rozpoznání obličeje jen vystředí obraz na mluvčího, nepozná, kdo zrovna mluví. U dvou lidí vedle sebe se použije rozdělená obrazovka.
 - YouTube občas blokuje stahování. Když stahování selže, zkuste to později. YouTube se mění často, může být potřeba program znovu sestavit s novější verzí `yt-dlp` (v záložce *Actions* stačí znovu spustit *Run workflow*).
 - Klipy z cizích podcastů vyžadují svolení autora.
-- Výběr momentů je placený podle spotřeby u Anthropic. Za jednu epizodu to bývají jednotky až desítky korun.
+- Ruční výběr přes chat je zdarma (podléhá limitům bezplatného chatu). Automatický výběr přes API je placený podle spotřeby.
 
 ## Pro vývojáře
 
