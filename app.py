@@ -23,6 +23,7 @@ from flask import Flask, abort, jsonify, request, send_from_directory
 import config
 from downloader import list_channel_videos
 from pipeline import load_transcript, prepare_video, process_video, render_clips
+import thisorthat
 from selector import build_prompts, finalize, parse_answer
 from platform_utils import FROZEN, data_dir, redirect_output_when_windowed, resource, setup_environment
 
@@ -121,7 +122,7 @@ def _load_jobs():
             pass
 
 
-def add_job(url, title=None, source="ručně"):
+def add_job(url, title=None, source="ručně", start=True):
     jid = uuid.uuid4().hex[:8]
     job = {
         "id": jid, "url": url, "title": title or url, "source": source,
@@ -131,7 +132,8 @@ def add_job(url, title=None, source="ručně"):
     with jobs_lock:
         jobs[jid] = job
         job_order.append(jid)
-    job_queue.put(jid)
+    if start:
+        job_queue.put(jid)
     return job
 
 
@@ -155,7 +157,16 @@ def worker():
 
         try:
             cfg = build_cfg()
-            if job.get("phase") == "render":
+            if job.get("kind") == "ton":
+                if not job.get("videos"):
+                    req = job["ton_request"]
+                    if not has_api_key():
+                        raise RuntimeError("Chybí API klíč Claude. Použijte ruční výběr (otázky z chatu) nebo klíč vyplňte v Nastavení.")
+                    job.update(stage="Claude vymýšlí otázky", pct=3)
+                    job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
+                results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"], log, progress)
+                job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
+            elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
                 transcript = load_transcript(cfg, job["info"]["id"])
                 results = render_clips(job["info"], transcript, job.get("pending_clips") or [], cfg, log, progress)
@@ -248,7 +259,7 @@ def watcher_loop():
 YT_RE = re.compile(r"^https?://([\w-]+\.)?(youtube\.com|youtu\.be)/", re.I)
 
 
-_HIDDEN_JOB_KEYS = ("log", "prompts", "pending_clips", "info")
+_HIDDEN_JOB_KEYS = ("log", "prompts", "pending_clips", "info", "videos", "ton_request")
 
 
 def _public_job(j):
@@ -352,6 +363,48 @@ def api_job_answers(jid):
         _persist_jobs()
     job_queue.put(jid)
     return jsonify(ok=True, clips=len(clips))
+
+
+def _ton_params(data):
+    topic = str(data.get("topic") or "").strip()[:120]
+    try:
+        rounds = max(2, min(thisorthat.MAX_ROUNDS, int(data.get("rounds") or 6)))
+        videos = max(1, min(5, int(data.get("videos") or 1)))
+    except (TypeError, ValueError):
+        rounds, videos = 6, 1
+    return topic, rounds, videos
+
+
+@app.post("/api/ton/prompt")
+def api_ton_prompt():
+    topic, rounds, videos = _ton_params(request.json or {})
+    if not topic:
+        return jsonify(error="Napište téma, například „jídlo“ nebo „filmy“."), 400
+    return jsonify(prompt=thisorthat.build_prompt(topic, rounds, videos))
+
+
+@app.post("/api/ton/generate")
+def api_ton_generate():
+    data = request.json or {}
+    topic, rounds, videos = _ton_params(data)
+    answer = str(data.get("answer") or "").strip()
+    if answer:
+        try:
+            vids = thisorthat.parse_questions(answer)
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+    elif build_cfg()["selection_mode"] == "api":
+        vids = None
+    else:
+        return jsonify(error="Vložte odpověď od Claude (blok s otázkami)."), 400
+    if not topic and vids:
+        topic = vids[0]["title"]
+    if not topic:
+        return jsonify(error="Napište téma."), 400
+    job = add_job("", title=f"To nebo to: {topic}", source="generátor", start=False)
+    job.update(kind="ton", topic=topic, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
+    job_queue.put(job["id"])
+    return jsonify(_public_job(job))
 
 
 @app.post("/api/channels")
@@ -615,6 +668,13 @@ def selftest():
         assert len(clips) == 1, "ruční výběr nevrátil klip"
         return f"{len(parts)} část, {len(clips)} klip"
 
+    def t_ton():
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "t.mp4"
+            thisorthat.render_video({"title": "Test", "rounds": [{"a": "Káva", "b": "Čaj"}]}, out)
+            assert out.exists() and out.stat().st_size > 5000, "video To nebo to je prázdné"
+            return f"{out.stat().st_size} B"
+
     def t_anthropic():
         import anthropic
         import selector  # noqa: F401
@@ -650,6 +710,7 @@ def selftest():
     check("ONNX runtime (VAD)", t_onnx)
     check("zkušební přepis (model tiny)", t_transcribe, required=False)  # potřebuje internet
     check("ruční výběr momentů", t_manual)
+    check("video To nebo to", t_ton)
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
     check("zkušební render klipu", t_render)

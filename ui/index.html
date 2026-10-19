@@ -110,6 +110,7 @@ a{color:var(--accent)}
   <div class="brand"><div class="logo"></div><b>Podcast<br>Clipper</b></div>
   <button class="tab active" data-tab="clips" onclick="showTab('clips')">Klipy</button>
   <button class="tab" data-tab="queue" onclick="showTab('queue')">Fronta<span id="qbadge" class="badge hide">0</span></button>
+  <button class="tab" data-tab="ton" onclick="showTab('ton')">To nebo to</button>
   <button class="tab" data-tab="channels" onclick="showTab('channels')">Kanály</button>
   <button class="tab" data-tab="settings" onclick="showTab('settings')">Nastavení</button>
   <div class="side-foot"><span>Zavřením okna aplikace neskončí, běží dál na pozadí.</span><button class="small" onclick="quitApp()">Ukončit aplikaci</button></div>
@@ -133,6 +134,26 @@ a{color:var(--accent)}
 
   <section id="tab-clips"></section>
   <section id="tab-queue" class="hide"></section>
+
+  <section id="tab-ton" class="hide">
+    <div class="card">
+      <h2 class="sec">Videa „To nebo to“ od nuly</h2>
+      <div class="hint" style="margin:-4px 0 14px">Aplikace vyrobí svislá videa se dvěma možnostmi, odpočtem 3, 2, 1 a výzvou do komentářů. Nepotřebuje žádné cizí video.</div>
+      <div class="field"><label for="ton_topic">Téma</label>
+        <input id="ton_topic" type="text" placeholder="například jídlo, filmy, škola, cestování…" autocomplete="off"></div>
+      <div class="row">
+        <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" type="number" min="2" max="12" value="6"></div>
+        <div class="field"><label for="ton_videos">Kolik videí</label><input id="ton_videos" type="number" min="1" max="5" value="1"></div>
+      </div>
+      <div id="ton_manual">
+        <div class="actions" style="margin:0 0 12px"><button onclick="tonCopy()">1. Kopírovat pokyny pro Claude</button></div>
+        <div class="hint" style="margin:0 0 8px">Vložte pokyny do chatu na <a href="https://claude.ai/new" target="_blank" rel="noopener">claude.ai</a> a odpověď (blok s kódem) vložte sem:</div>
+        <div class="part"><textarea id="ton_answer" placeholder="Sem vložte odpověď od Claude…"></textarea></div>
+      </div>
+      <div class="hint hide" id="ton_apihint">Zapnutý je automatický výběr: otázky vymyslí Claude sám přes váš API klíč.</div>
+      <div class="actions"><button class="primary" onclick="tonGenerate()">Vytvořit videa</button></div>
+    </div>
+  </section>
 
   <section id="tab-channels" class="hide">
     <div class="card" style="margin-bottom:18px">
@@ -216,9 +237,9 @@ async function api(path, method="GET", body){
   return data;
 }
 function showTab(t){
-  tab=t; $("stagetitle").textContent={clips:"Hotové klipy",queue:"Fronta",channels:"Sledované kanály",settings:"Nastavení"}[t];
+  tab=t; $("stagetitle").textContent={clips:"Hotové klipy",queue:"Fronta",ton:"To nebo to",channels:"Sledované kanály",settings:"Nastavení"}[t];
   document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===t));
-  ["clips","queue","channels","settings"].forEach(n=>$("tab-"+n).classList.toggle("hide",n!==t));
+  ["clips","queue","ton","channels","settings"].forEach(n=>$("tab-"+n).classList.toggle("hide",n!==t));
   if(t==="clips") loadClips();
   if(t==="settings") fillSettings(true);
 }
@@ -296,6 +317,17 @@ async function sendAnswers(id){
   try{ const r=await api(`/api/jobs/${id}/answers`,"POST",{answers}); toast(`Vybráno ${r.clips} klipů, vytvářím…`); delete drafts[id]; queueSig=""; refresh(); }
   catch(e){ alert(e.message); }
 }
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value}; }
+async function tonCopy(){
+  try{ const r=await api("/api/ton/prompt","POST",tonBody());
+    await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
+  catch(e){ toast(e.message); }
+}
+async function tonGenerate(){
+  try{ await api("/api/ton/generate","POST",{...tonBody(), answer:$("ton_answer").value});
+    $("ton_answer").value=""; toast("Vytvářím videa…"); queueSig=""; showTab("queue"); refresh(); }
+  catch(e){ alert(e.message); }
+}
 async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); queueSig=""; refresh(); }
 async function delJob(id){ if(state.jobs.find(j=>j.id===id)?.status==="waiting" && !confirm("Odebrat úlohu? Stažené video a přepis se smažou.")) return; await api(`/api/jobs/${id}`,"DELETE"); delete drafts[id]; delete promptCache[id]; queueSig=""; refresh(); }
 
@@ -309,7 +341,7 @@ async function loadClips(){
         <button class="small danger" onclick="delOutput('${esc(v.id)}')">Smazat</button></div>
       <div class="grid">${v.clips.map(c=>`
         <div class="card clip">
-          <div class="clipview"><video controls preload="metadata" src="/media/${esc(v.id)}/${encodeURIComponent(c.file)}#t=0.1"></video><span class="score">Skóre ${esc(c.score)}</span></div>
+          <div class="clipview"><video controls preload="metadata" src="/media/${esc(v.id)}/${encodeURIComponent(c.file)}#t=0.1"></video>${c.score?`<span class="score">Skóre ${esc(c.score)}</span>`:""}</div>
           <div class="clipbody">
             <div class="cliptitle">${esc(c.title)}</div>
             <div class="hook">${esc(c.hook)}</div>
@@ -391,6 +423,8 @@ async function refresh(){
   const active=state.jobs.filter(j=>j.status==="running"||j.status==="queued").length;
   const waiting=state.jobs.filter(j=>j.status==="waiting").length;
   $("qbadge").textContent=active+waiting; $("qbadge").classList.toggle("hide",!(active+waiting));
+  const api_mode = state.selection_mode==="api";
+  $("ton_manual").classList.toggle("hide", api_mode); $("ton_apihint").classList.toggle("hide", !api_mode);
   renderQueue(); renderChannels(); fillSettings(false);
   const done=state.jobs.filter(j=>j.status==="done").length;
   if(lastDone!==-1 && done!==lastDone && tab==="clips") loadClips();

@@ -46,6 +46,7 @@ Výběr momentů přes chat je zdarma, ale vyžaduje vaši krátkou práci u ka�
 
 - **Klipy:** hotová videa s přehrávačem, názvem, hookem a skóre. Jdou stáhnout.
 - **Fronta:** průběh zpracování a výběr momentů přes chat. Při chybě je tlačítko *Zkusit znovu*.
+- **To nebo to:** vyrobí od nuly svislá videa se hrou „To nebo to“ (dvě možnosti, odpočet 3, 2, 1, výzva do komentářů, zvuk odpočtu). Zadáte téma, zkopírujete pokyny do chatu na claude.ai, odpověď vložíte zpět a aplikace videa vytvoří. Hotová videa najdete v záložce Klipy.
 - **Kanály:** přidáte kanál podcastu a aplikace sama zpracuje každý nový díl (musí běžet).
 - **Nastavení:** jazyk, přesnost přepisu, počet a délka klipů, vzhled titulků.
 
