@@ -163,6 +163,14 @@ a{color:var(--accent)}
         </select>
         <div class="hint">Ručně: aplikace připraví text, vy ho vložíte do chatu na claude.ai a odpověď vložíte zpět. Automaticky: vše proběhne samo, ale API klíč vyžaduje předplacený kredit u Anthropic.</div>
       </div>
+      <div class="field">
+        <label for="s_clip_style">Jaké klipy hledat</label>
+        <select id="s_clip_style">
+          <option value="general">Nejlepší momenty z podcastu</option>
+          <option value="thisorthat">Hra „To nebo to“ (jedna otázka = jeden klip)</option>
+        </select>
+        <div class="hint">U hry „To nebo to“ se klipy zkrátí na 12–60 s a Claude hledá jen úseky, kde hosté vybírají z dvou možností.</div>
+      </div>
       <div class="field" id="keyfield">
         <label for="s_key">API klíč</label>
         <input id="s_key" type="password" placeholder="sk-ant-…" autocomplete="off">
@@ -363,7 +371,7 @@ function fillSettings(force){
   if(!state || (settingsLoaded && !force)) return;
   const d=state.defaults, s=state.settings, sub=d.subtitles;
   const v=(k)=>s[k] ?? d[k];
-  $("s_selection_mode").value=v("selection_mode")||"manual"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
+  $("s_selection_mode").value=v("selection_mode")||"manual"; $("s_clip_style").value=v("clip_style")||"general"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
   $("s_clips_per_video").value=v("clips_per_video"); $("s_min_clip_seconds").value=v("min_clip_seconds");
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
   $("s_keep_source").checked=!!v("keep_source");
@@ -374,7 +382,7 @@ function fillSettings(force){
 }
 async function saveSettings(){
   const body={
-    selection_mode:$("s_selection_mode").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value,
+    selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value,
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
     keep_source:$("s_keep_source").checked,

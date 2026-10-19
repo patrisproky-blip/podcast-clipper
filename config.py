@@ -9,6 +9,7 @@ DEFAULTS = {
     "whisper_device": "cpu",       # sestavená aplikace neobsahuje ovladače grafické karty
     "whisper_compute_type": "int8",
     "selection_mode": "manual",    # "manual" = ručně přes chat Claude (zdarma), "api" = automaticky přes API
+    "clip_style": "general",       # "general" nebo "thisorthat" (hra To nebo to)
     "claude_model": "claude-sonnet-5-5",
     "clips_per_video": 6,
     "min_clip_seconds": 25,
