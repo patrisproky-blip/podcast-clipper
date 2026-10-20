@@ -19,13 +19,11 @@ from platform_utils import ffmpeg_path, hidden_subprocess_kwargs, resource
 from selector import _loads_lenient
 
 W, H = 1080, 1920
-HEADER = 190
-MID = (HEADER + H) // 2
 FONT_PATH = resource("assets", "DejaVuSansCondensed-Bold.ttf")
 FPS, COUNT_S, MAX_ROUNDS = 30, 3, 12
 MIN_READ_S, MIN_REVEAL_S, END_S = 2.5, 2.4, 3.0
 
-BLUE, RED = (45, 127, 249), (239, 62, 74)   # horní půlka modrá, spodní červená
+RED, BLUE = (250, 40, 40), (10, 50, 250)   # horní půlka červená, spodní modrá (podle vzoru)
 INK, GREEN = (16, 19, 26), (56, 224, 120)
 VOICES = {"antonin": "cs-CZ-AntoninNeural", "vlasta": "cs-CZ-VlastaNeural", "off": None}
 EMOJI_URL = "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/2D/png/512/emoji_u{code}.png"
@@ -193,11 +191,17 @@ def _emoji_image(emoji, cache_dir, failed):
 
 # ------------------------------------------------------------------ vykreslení
 
+SX, SY = 0.78, 1.1   # písmo se zúží a prodlouží, aby působilo jako úzké tučné titulkové písmo
+MID = H // 2
+BAND = 16            # polovina výšky černého proužku mezi půlkami
+PIC = 430            # velikost obrázku
+
+
 def _wrap(draw, text, font, max_w):
     lines, cur = [], ""
     for word in text.split():
         trial = (cur + " " + word).strip()
-        if draw.textlength(trial, font=font) <= max_w or not cur:
+        if draw.textlength(trial, font=font) * SX <= max_w or not cur:
             cur = trial
         else:
             lines.append(cur)
@@ -207,70 +211,86 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
-def _text_block(draw, text, cx, cy, max_w, max_h, start=150, fill=(255, 255, 255)):
+def _line_layer(text, size, fill):
+    font = _font(size)
+    sw = max(4, size // 8)
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    w = int(probe.textlength(text, font=font)) + 2 * sw + 8
+    h = int(size * 1.35) + 2 * sw
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((sw + 4, h // 2), text, font=font, fill=fill, anchor="lm",
+                               stroke_width=sw, stroke_fill=(0, 0, 0))
+    return layer.resize((max(1, int(w * SX)), max(1, int(h * SY))), Image.LANCZOS)
+
+
+def _text_block(img, text, cx, cy, max_w, max_h, start=170, fill=(255, 255, 255)):
     """Vycentruje text do rámečku, velikost se zmenšuje, dokud se nevejde."""
-    text = text.upper()
-    for size in range(start, 39, -6):
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    for size in range(start, 47, -6):
         font = _font(size)
-        lines = _wrap(draw, text, font, max_w)
-        if all(draw.textlength(w, font=font) <= max_w for w in text.split()) and len(lines) * size * 1.18 <= max_h:
+        lines = _wrap(probe, text, font, max_w)
+        step = size * SY * 1.12
+        if all(probe.textlength(w, font=font) * SX <= max_w for w in text.split()) and len(lines) * step <= max_h:
             break
-    step = size * 1.18
     y = cy - step * len(lines) / 2 + step / 2
     for ln in lines:
-        draw.text((cx, y), ln, font=font, fill=fill, anchor="mm", stroke_width=max(3, size // 22), stroke_fill=(0, 0, 0))
+        layer = _line_layer(ln, size, fill)
+        img.paste(layer, (int(cx - layer.width / 2), int(y - layer.height / 2)), layer)
         y += step
 
 
-def _half(img, d, top, text, pic, pct, winner):
-    """Jedna půlka: obrázek, text a (po odpočtu) procenta. top = svislý začátek obsahu."""
+def _half(img, top_half, text, pic, pct, winner):
+    """Jedna půlka podle vzoru: obrázek na kraji, text blíž ke středu, procenta mezi textem a středem."""
     cx = W // 2
+    sign = 1 if top_half else -1                     # směr od okraje ke středu
+    edge = 40 if top_half else H - 40
     if pic is not None:
-        side = 290
-        p = pic.resize((side, side), Image.LANCZOS)
-        img.paste(p, (cx - side // 2, top), p)
-        _text_block(d, text, cx, top + side + 125, W - 140, 220, start=110)
+        p = pic.resize((PIC, PIC), Image.LANCZOS)
+        y0 = edge if top_half else edge - PIC
+        img.paste(p, (cx - PIC // 2, y0), p)
+        text_c = edge + sign * (PIC + 110)
+        _text_block(img, text, cx, text_c, W - 120, 200, start=170)
     else:
-        _text_block(d, text, cx, top + 235, W - 140, 400, start=150)
+        text_c = edge + sign * 330
+        _text_block(img, text, cx, text_c, W - 120, 520, start=210)
     if pct is not None:
         color = GREEN if winner else (255, 255, 255)
-        d.text((cx, top + 600), f"{pct} %", font=_font(130), fill=color, anchor="mm",
-               stroke_width=8, stroke_fill=(0, 0, 0))
+        _text_block(img, f"{pct} %", cx, MID - sign * 185, W - 200, 175, start=170, fill=color)
+
+
+def _circle(img, label, size):
+    d = ImageDraw.Draw(img)
+    r = 84
+    d.ellipse([W // 2 - r, MID - r, W // 2 + r, MID + r], fill=(30, 30, 30))
+    layer = _line_layer(label, size, (255, 255, 255))
+    img.paste(layer, (W // 2 - layer.width // 2, MID - layer.height // 2 - 2), layer)
 
 
 def _frame(rnd, idx, total, title, pics, count=None, reveal=None):
-    img = Image.new("RGB", (W, H), BLUE)
+    img = Image.new("RGB", (W, H), RED)
     d = ImageDraw.Draw(img)
-    d.rectangle([0, MID, W, H], fill=RED)
-    d.rectangle([0, 0, W, HEADER], fill=INK)
-    d.text((60, HEADER // 2), title.upper(), font=_font(54), fill=(255, 255, 255), anchor="lm")
-    d.text((W - 60, HEADER // 2), f"{idx} / {total}", font=_font(54), fill=(255, 255, 255), anchor="rm")
-
+    d.rectangle([0, MID, W, H], fill=BLUE)
+    d.rectangle([0, MID - BAND, W, MID + BAND], fill=(0, 0, 0))
     pa = pb = None
     if reveal:
         pa = reveal["pct_win"] if reveal["win"] == "a" else reveal["pct_lose"]
         pb = reveal["pct_win"] if reveal["win"] == "b" else reveal["pct_lose"]
-    _half(img, d, HEADER + 25, rnd["a"], pics[0], pa, bool(reveal) and reveal["win"] == "a")
-    _half(img, d, MID + 140, rnd["b"], pics[1], pb, bool(reveal) and reveal["win"] == "b")
-
-    r = 118
-    d.ellipse([W // 2 - r - 10, MID - r - 10, W // 2 + r + 10, MID + r + 10], fill=INK)
-    d.ellipse([W // 2 - r, MID - r, W // 2 + r, MID + r], fill=(255, 255, 255))
+    _half(img, True, rnd["a"], pics[0], pa, bool(reveal) and reveal["win"] == "a")
+    _half(img, False, rnd["b"], pics[1], pb, bool(reveal) and reveal["win"] == "b")
     if count is None:
-        d.text((W // 2, MID), "NEBO", font=_font(62), fill=INK, anchor="mm")
+        _circle(img, "nebo", 70)
     else:
-        d.text((W // 2, MID - 4), str(count), font=_font(170), fill=BLUE if count != 1 else RED, anchor="mm")
+        _circle(img, str(count), 120)
     return img
 
 
 def _end_frame(title):
-    img = Image.new("RGB", (W, H), INK)
+    img = Image.new("RGB", (W, H), RED)
     d = ImageDraw.Draw(img)
-    d.rectangle([0, H // 2 - 6, W, H // 2 + 6], fill=RED)
-    d.rectangle([0, H // 2 - 6, W // 2, H // 2 + 6], fill=BLUE)
-    _text_block(d, "A co ty?", W // 2, H // 2 - 330, W - 140, 400, start=150)
-    _text_block(d, "Napiš to do komentářů", W // 2, H // 2 + 250, W - 140, 300, start=90, fill=(170, 200, 255))
-    d.text((W // 2, H - 150), title.upper(), font=_font(46), fill=(150, 156, 170), anchor="mm")
+    d.rectangle([0, MID, W, H], fill=BLUE)
+    d.rectangle([0, MID - BAND, W, MID + BAND], fill=(0, 0, 0))
+    _text_block(img, "A co ty?", W // 2, MID - 330, W - 120, 400, start=230)
+    _text_block(img, "Napiš to do komentářů", W // 2, MID + 330, W - 120, 400, start=150)
     return img
 
 
