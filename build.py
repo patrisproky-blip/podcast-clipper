@@ -26,7 +26,7 @@ BUILD_BIN = ROOT / "build_bin"
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 NAME = "PodcastClipper"
-REQUIRED = {"faster_whisper", "ctranslate2", "yt_dlp", "yt_dlp_ejs", "anthropic"}
+REQUIRED = {"faster_whisper", "ctranslate2", "yt_dlp", "yt_dlp_ejs", "anthropic", "edge_tts"}
 
 
 def make_executable(p):
@@ -88,7 +88,7 @@ def main():
         "--collect-data", "cv2",
     ]
     for mod in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "yt_dlp", "yt_dlp_ejs",
-                "anthropic", "certifi"):
+                "anthropic", "certifi", "edge_tts", "aiohttp"):
         if has(mod):
             args += ["--collect-all", mod]
         elif mod in REQUIRED:

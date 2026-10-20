@@ -164,7 +164,8 @@ def worker():
                         raise RuntimeError("Chybí API klíč Claude. Použijte ruční výběr (otázky z chatu) nebo klíč vyplňte v Nastavení.")
                     job.update(stage="Claude vymýšlí otázky", pct=3)
                     job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
-                results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"], log, progress)
+                results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
+                                              job.get("voice", "antonin"), log, progress)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -402,7 +403,8 @@ def api_ton_generate():
     if not topic:
         return jsonify(error="Napište téma."), 400
     job = add_job("", title=f"To nebo to: {topic}", source="generátor", start=False)
-    job.update(kind="ton", topic=topic, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
+    voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "antonin"
+    job.update(kind="ton", topic=topic, voice=voice, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))
 
@@ -671,9 +673,14 @@ def selftest():
     def t_ton():
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "t.mp4"
-            thisorthat.render_video({"title": "Test", "rounds": [{"a": "Káva", "b": "Čaj"}]}, out)
+            thisorthat.render_video({"title": "Test", "rounds": [{"a": "Káva", "ea": "", "b": "Čaj", "eb": ""}]}, out, voice=None)
             assert out.exists() and out.stat().st_size > 5000, "video To nebo to je prázdné"
             return f"{out.stat().st_size} B"
+
+    def t_voice_lib():
+        import edge_tts  # noqa: F401
+        import aiohttp  # noqa: F401
+        return "edge-tts načten (samotný hlas potřebuje internet)"
 
     def t_anthropic():
         import anthropic
@@ -711,6 +718,7 @@ def selftest():
     check("zkušební přepis (model tiny)", t_transcribe, required=False)  # potřebuje internet
     check("ruční výběr momentů", t_manual)
     check("video To nebo to", t_ton)
+    check("hlas (edge-tts)", t_voice_lib)
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
     check("zkušební render klipu", t_render)

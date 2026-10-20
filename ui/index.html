@@ -138,13 +138,16 @@ a{color:var(--accent)}
   <section id="tab-ton" class="hide">
     <div class="card">
       <h2 class="sec">Videa „To nebo to“ od nuly</h2>
-      <div class="hint" style="margin:-4px 0 14px">Aplikace vyrobí svislá videa se dvěma možnostmi, odpočtem 3, 2, 1 a výzvou do komentářů. Nepotřebuje žádné cizí video.</div>
+      <div class="hint" style="margin:-4px 0 14px">Aplikace vyrobí svislá videa: nahoře modrá, dole červená možnost s obrázkem, namluvená otázka, odpočet 3, 2, 1 a procenta (vítěz zezelená). Procenta jsou jen pro zábavu, nejsou skutečné hlasování.</div>
       <div class="field"><label for="ton_topic">Téma</label>
         <input id="ton_topic" type="text" placeholder="například jídlo, filmy, škola, cestování…" autocomplete="off"></div>
       <div class="row">
         <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" type="number" min="2" max="12" value="6"></div>
         <div class="field"><label for="ton_videos">Kolik videí</label><input id="ton_videos" type="number" min="1" max="5" value="1"></div>
       </div>
+      <div class="field"><label for="ton_voice">Namluvení</label>
+        <select id="ton_voice"><option value="antonin">Český hlas, muž (Antonín)</option><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="off">Bez hlasu</option></select>
+        <div class="hint">Hlas i obrázky se stahují z internetu, takže počítač při vytváření musí být online. Když se nepodaří, video vznikne bez nich.</div></div>
       <div id="ton_manual">
         <div class="actions" style="margin:0 0 12px"><button onclick="tonCopy()">1. Kopírovat pokyny pro Claude</button></div>
         <div class="hint" style="margin:0 0 8px">Vložte pokyny do chatu na <a href="https://claude.ai/new" target="_blank" rel="noopener">claude.ai</a> a odpověď (blok s kódem) vložte sem:</div>
@@ -317,7 +320,7 @@ async function sendAnswers(id){
   try{ const r=await api(`/api/jobs/${id}/answers`,"POST",{answers}); toast(`Vybráno ${r.clips} klipů, vytvářím…`); delete drafts[id]; queueSig=""; refresh(); }
   catch(e){ alert(e.message); }
 }
-function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value}; }
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value}; }
 async function tonCopy(){
   try{ const r=await api("/api/ton/prompt","POST",tonBody());
     await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
