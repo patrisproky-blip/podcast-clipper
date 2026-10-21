@@ -51,21 +51,30 @@ def build_prompt(topic, rounds, videos):
         "- Piš česky, přirozeně. Každá možnost je v 1. pádu (nominativu), protože ji bude číst hlas.\n"
         "- Každá možnost je krátká, nejvýše 4 slova, aby se vešla na obrazovku.\n"
         "- Obě možnosti mají být vyvážené, aby se divák těžko rozhodoval. Žádná nemá být zjevně lepší.\n"
-        "- Ke každé možnosti přidej jeden emoji, který ji nejlépe vystihuje (bude z něj obrázek). "
+        "- Pokud je možnost značka, firma, aplikace, služba nebo hra (například McDonald's, Netflix, iPhone), "
+        "uveď v poli la / lb její hlavní internetovou doménu (například mcdonalds.com), z ní se stáhne logo. "
+        "U všeho ostatního nech doménu prázdnou.\n"
+        "- Ke každé možnosti bez domény přidej jeden emoji, který ji nejlépe vystihuje (bude z něj obrázek). "
         "Když žádný nesedí, dej prázdný řetězec.\n"
         "- Otázky se v rámci videí neopakují.\n"
         "- Nic urážlivého, sexuálního, politického ani o zdraví a tragédiích.\n"
         "- Každé video dostane krátký název (nejvýše 5 slov) a otázky jdou od lehčích ke zábavnějším.\n\n"
         "Odpověz POUZE jedním blokem kódu ve formátu JSON a nic dalšího nepiš. Formát:\n"
         "```json\n"
-        '{"videos": [{"title": "Jídlo", "rounds": [{"a": "Pizza", "ea": "🍕", "b": "Burger", "eb": "🍔"}, '
-        '{"a": "Léto", "ea": "☀️", "b": "Zima", "eb": "❄️"}]}]}\n'
+        '{"videos": [{"title": "Jídlo", "rounds": [{"a": "Pizza", "la": "", "ea": "🍕", "b": "Burger", "lb": "", "eb": "🍔"}, '
+        '{"a": "Netflix", "la": "netflix.com", "ea": "", "b": "YouTube", "lb": "youtube.com", "eb": ""}]}]}\n'
         "```"
     )
 
 
 def _clean(text, limit=60):
     return re.sub(r"\s+", " ", str(text or "")).strip()[:limit]
+
+
+def _domain(text):
+    d = re.sub(r"^https?://", "", str(text or "").strip().lower()).split("/")[0]
+    d = re.sub(r"^www\.", "", d)
+    return d if re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.[a-z]{2,}", d) else ""
 
 
 def _emoji(text):
@@ -107,7 +116,8 @@ def parse_questions(text):
             if isinstance(r, dict):
                 a, b = _clean(r.get("a")), _clean(r.get("b"))
                 if a and b:
-                    rounds.append({"a": a, "b": b, "ea": _emoji(r.get("ea")), "eb": _emoji(r.get("eb"))})
+                    rounds.append({"a": a, "b": b, "ea": _emoji(r.get("ea")), "eb": _emoji(r.get("eb")),
+                                   "la": _domain(r.get("la")), "lb": _domain(r.get("lb"))})
         if rounds:
             videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "rounds": rounds[:MAX_ROUNDS]})
     if not videos:
@@ -187,6 +197,60 @@ def _emoji_image(emoji, cache_dir, failed):
         return Image.open(path).convert("RGBA")
     except Exception:  # noqa: BLE001
         return None
+
+
+LOGO_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=256"
+
+
+def _download(url, dest, failed, key):
+    if dest.exists() or key in failed:
+        return dest.exists()
+    try:
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:  # noqa: BLE001
+            ctx = ssl.create_default_context()
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+            data = r.read()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        return True
+    except Exception:  # noqa: BLE001
+        failed.add(key)
+        return False
+
+
+def _logo_card(domain, cache_dir, failed):
+    """Logo značky na bílé zaoblené kartě (aby bylo vidět na červené i modré)."""
+    if not domain or not cache_dir:
+        return None
+    path = Path(cache_dir) / "logos" / f"{domain}.png"
+    if not _download(LOGO_URL.format(domain=domain), path, failed, "logo:" + domain):
+        return None
+    try:
+        logo = Image.open(path).convert("RGBA")
+    except Exception:  # noqa: BLE001
+        return None
+    if min(logo.size) < 16:
+        return None
+    size = 512
+    card = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(card).rounded_rectangle([0, 0, size - 1, size - 1], radius=84, fill=(255, 255, 255, 255))
+    box = int(size * 0.68)
+    k = box / max(logo.size)
+    logo = logo.resize((max(1, int(logo.width * k)), max(1, int(logo.height * k))), Image.LANCZOS)
+    card.paste(logo, ((size - logo.width) // 2, (size - logo.height) // 2), logo)
+    return card
+
+
+def _pictures(rnd, cache_dir, failed):
+    """Pro každou možnost: logo značky, jinak emoji, jinak nic."""
+    out = []
+    for side in ("a", "b"):
+        out.append(_logo_card(rnd.get("l" + side), cache_dir, failed) or _emoji_image(rnd.get("e" + side), cache_dir, failed))
+    return tuple(out)
 
 
 # ------------------------------------------------------------------ vykreslení
@@ -379,7 +443,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print):
 
         used_phrases = []
         for i, (rnd, res) in enumerate(zip(rounds, results), 1):
-            pics = (_emoji_image(rnd.get("ea"), cache_dir, failed_img), _emoji_image(rnd.get("eb"), cache_dir, failed_img))
+            pics = _pictures(rnd, cache_dir, failed_img)
             question = f"{rnd['a']}, nebo {rnd['b']}?"
             if i == 1:
                 question = "To nebo to? " + question
