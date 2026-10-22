@@ -41,7 +41,7 @@ app = Flask(__name__)
 # ----------------------------------------------------------------- nastavení
 
 INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min")
-STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode")
+STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style")
 
 
 def load_settings():
@@ -79,6 +79,11 @@ def build_cfg():
     cfg["subtitles"].update(s.get("subtitles", {}))
     if cfg.get("selection_mode") not in ("manual", "api"):
         cfg["selection_mode"] = "manual"
+    if cfg.get("clip_style") not in ("general", "thisorthat"):
+        cfg["clip_style"] = "general"
+    if cfg["clip_style"] == "thisorthat":  # krátké klipy: jedna otázka a reakce
+        cfg["min_clip_seconds"] = min(cfg["min_clip_seconds"], 12)
+        cfg["max_clip_seconds"] = min(cfg["max_clip_seconds"], 60)
     if s.get("api_key"):
         os.environ["ANTHROPIC_API_KEY"] = s["api_key"]
     return cfg
@@ -469,6 +474,8 @@ def api_save_settings():
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
         s.pop("api_key", None)
+    if "clip_style" in data and data["clip_style"] not in ("general", "thisorthat"):
+        return jsonify(error="Neznámý typ klipů."), 400
     if "selection_mode" in data and data["selection_mode"] not in ("manual", "api"):
         return jsonify(error="Neznámý způsob výběru momentů."), 400
     for k in STR_KEYS:

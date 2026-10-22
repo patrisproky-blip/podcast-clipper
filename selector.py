@@ -44,6 +44,24 @@ Nezačínej uprostřed myšlenky ani slovy typu "no a tak..." či odpovědí bez
 - Klipy se nesmí překrývat.
 - Nevymýšlej nic, co v přepisu není. Název a hook piš česky, přirozeně, bez clickbaitových lží."""
 
+RULES_TON = """Jsi zkušený střihač krátkých vertikálních videí (TikTok, YouTube Shorts, Instagram Reels) \
+z podcastů. Hledáš výhradně úseky, kde se hraje hra „To nebo to“ (anglicky „This or that“ / „Would you rather“): \
+někdo nahlas přečte nebo vysloví dvě možnosti a ostatní si vybírají jednu z nich, často s krátkou reakcí nebo vtipem.
+
+Pravidla výběru:
+- Klip začíná těsně před otázkou, tedy v okamžiku, kdy zazní první možnost. Nezačínej dřív, žádný úvod ani povídání před hrou.
+- Obě možnosti musí být v klipu slyšet celé.
+- Klip pokračuje odpověďmi a vtipnými nebo překvapivými reakcemi a končí po dokončené reakci na poslední odpověď, ne uprostřed věty.
+- Jedna otázka = jeden klip. Když hra pokračuje další otázkou, začni nový klip. Jen když jsou otázky velmi krátké, můžeš spojit dvě až tři za sebou.
+- Vyber nejzábavnější otázky: kontroverzní volby, silné reakce, neshoda mezi hosty, překvapivé nebo vtipné odpovědi. Nudné nebo bez reakce vynech.
+- Pokud v přepisu žádná taková hra není, vrať prázdný seznam. Nevymýšlej nic, co v přepisu není.
+- Časy `start` a `end` v sekundách podle časových značek v přepisu. Klipy se nesmí překrývat. Název piš česky, krátký, ve tvaru dvou možností (například „Pizza nebo burger?“)."""
+
+
+def rules(cfg):
+    return RULES_TON if cfg.get("clip_style") == "thisorthat" else RULES
+
+
 SYSTEM = RULES + "\nVrať výsledek voláním nástroje submit_clips."
 
 
@@ -74,7 +92,7 @@ def _ask(client, cfg, text, n):
     resp = client.messages.create(
         model=cfg["claude_model"],
         max_tokens=4096,
-        system=SYSTEM,
+        system=rules(cfg) + "\nVrať výsledek voláním nástroje submit_clips.",
         tools=[TOOL],
         tool_choice={"type": "tool", "name": "submit_clips"},
         messages=[{"role": "user", "content": prompt}],
@@ -165,7 +183,7 @@ def build_prompts(transcript, cfg):
     for part in chunks:
         text = _format(part)
         prompt = (
-            f"{RULES}\n\n"
+            f"{rules(cfg)}\n\n"
             f"Délka klipu: {cfg['min_clip_seconds']}–{cfg['max_clip_seconds']} sekund.\n"
             f"Vyber nejvýše {n} nejlepších momentů z následujícího přepisu "
             f"(časové značky jsou v sekundách od začátku celého videa).\n\n"
@@ -174,7 +192,7 @@ def build_prompts(transcript, cfg):
             '{"clips": [{"start": 123.4, "end": 170.2, "title": "Název česky", "hook": "Úvodní věta", '
             '"score": 85, "reason": "Proč je moment silný"}]}\n'
             "```\n"
-            "(start a end jsou čísla v sekundách, score je 1 až 100.)\n\n"
+            "(start a end jsou čísla v sekundách, score je 1 až 100. Pokud nic nevyhovuje, odpověz {\"clips\": []}.)\n\n"
             f"PŘEPIS:\n{text}"
         )
         out.append({
@@ -264,5 +282,7 @@ def parse_answer(text):
             "reason": str(it.get("reason") or ""),
         })
     if not clips:
+        if items == [] or (isinstance(items, list) and not any(isinstance(i, dict) for i in items)):
+            raise ValueError("Claude v této části nenašel nic vhodného (prázdný seznam). Nechte pole prázdné a pokračujte dalšími částmi.")
         raise ValueError("V odpovědi nejsou žádné použitelné klipy (chybí start a end v sekundách).")
     return clips
