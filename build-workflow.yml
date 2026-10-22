@@ -18,8 +18,6 @@ jobs:
         include:
           - os: windows-latest
             label: Windows
-          - os: macos-latest
-            label: macOS
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -53,22 +51,10 @@ jobs:
           if (Test-Path "$HOME\PodcastClipper\selftest.log") { Get-Content "$HOME\PodcastClipper\selftest.log" } else { Write-Host "selftest.log nevznikl" }
           if ($p.ExitCode -ne 0) { exit 1 }
 
-      - name: Samotest aplikace (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          status=0
-          dist/PodcastClipper.app/Contents/MacOS/PodcastClipper --selftest || status=$?
-          cat ~/PodcastClipper/selftest.log || true
-          exit $status
-
       - name: Zabalení (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: 7z a -tzip PodcastClipper-Windows.zip .\dist\PodcastClipper
-
-      - name: Zabalení (macOS)
-        if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/PodcastClipper.app PodcastClipper-macOS.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -124,7 +110,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "Stáhněte zip pro svůj systém (Windows nebo macOS), rozbalte a spusťte. Návod je v souboru README.md."
+            echo "Stáhněte PodcastClipper-Windows.zip, rozbalte a spusťte PodcastClipper.exe. Návod je v souboru README.md."
             echo; echo "Výsledek samotestu:"
             for f in selftests/*.log; do
               [ -e "$f" ] || continue

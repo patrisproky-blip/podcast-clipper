@@ -25,7 +25,7 @@ Tato složka obsahuje zdrojový kód. Samotný program (Windows a Mac) se z něj
 
 **Červený křížek u běhu?** Klikněte na něj, rozklikněte červený krok a pošlete mi text chyby nebo snímek obrazovky. Sestavení obsahuje samotest, který hlásí, co v programu chybí.
 
-Poznámka: sestavení pro Mac je pro počítače s čipem Apple (M1 a novější).
+Poznámka: sestavuje se jen verze pro Windows.
 
 ## Část 2: První spuštění
 
