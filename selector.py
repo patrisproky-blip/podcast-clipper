@@ -58,8 +58,24 @@ Pravidla výběru:
 - Časy `start` a `end` v sekundách podle časových značek v přepisu. Klipy se nesmí překrývat. Název piš česky, krátký, ve tvaru dvou možností (například „Pizza nebo burger?“)."""
 
 
+RULES_STREAM = """Jsi zkušený střihač krátkých vertikálních videí (TikTok, YouTube Shorts, Instagram Reels) \
+ze záznamů živých přenosů (stream na Twitchi nebo Kicku). Z přepisu hledáš úseky, které zaberou i bez znalosti zbytku streamu.
+
+Pravidla výběru:
+- Hledej silné emoce a vyvrcholení: výkřiky, smích, vztek, překvapení, prohra nebo výhra, trapas, vtipná hláška, \
+reakce na donate nebo chat, neočekávaný zvrat.
+- Klip začíná chvíli před vyvrcholením (krátké nastavení situace), aby divák rozuměl, o co jde, ale bez zdlouhavého úvodu.
+- Klip končí dokončenou reakcí nebo pointou, ne uprostřed věty.
+- Přepis je u hlasité hry nepřesný a obsahuje mezery. Když je v přepisu náhlá hustá série krátkých slov nebo výkřiků, \
+bývá to zajímavé místo.
+- Nepoužívej úseky, kde se jen mlčí nebo se řeší technické problémy.
+- Délka v zadaném rozmezí, časy `start` a `end` v sekundách podle časových značek v přepisu. Klipy se nesmí překrývat.
+- Nevymýšlej nic, co v přepisu není. Název a hook piš česky, přirozeně, bez clickbaitových lží."""
+
+
 def rules(cfg):
-    return RULES_TON if cfg.get("clip_style") == "thisorthat" else RULES
+    style = cfg.get("clip_style")
+    return RULES_TON if style == "thisorthat" else RULES_STREAM if style == "stream" else RULES
 
 
 SYSTEM = RULES + "\nVrať výsledek voláním nástroje submit_clips."

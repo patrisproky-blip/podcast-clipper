@@ -38,7 +38,7 @@ Po spuštění se otevře prohlížeč s aplikací. Pak:
 1. Vložte odkaz na YouTube video nahoře a klikněte *Vytvořit klipy*.
 2. Aplikace video stáhne a přepíše řeč (první přepis stáhne jazykový model, u výchozí „small“ asi 500 MB, proto první video trvá déle).
 3. Ve **Frontě** se úloha změní na *Čeká na vás*. Klikněte na *Kopírovat pokyny*, vložte je do chatu na claude.ai (stačí bezplatný účet), odpověď od Claude zkopírujte do pole pod pokyny a klikněte *Vytvořit klipy*. U dlouhých dílů je pokynů více, každé patří do nového chatu.
-4. Aplikace klipy vytvoří.
+4. Aplikace ukáže vybrané klipy ke kontrole. Můžete upravit začátek a konec, změnit název, klip vyřadit a pustit si ukázku. Pak kliknete na *Vytvořit klipy*.
 
 Výběr momentů přes chat je zdarma, ale vyžaduje vaši krátkou práci u každého videa. Sledování celého kanálu proto u každého dílu zastaví v *Čeká na vás*. Chcete-li, aby šlo vše samo, přepněte v *Nastavení* na automatický výběr. Ten potřebuje API klíč z Anthropic Console (console.anthropic.com) s předplaceným kreditem.
 
@@ -46,9 +46,9 @@ Výběr momentů přes chat je zdarma, ale vyžaduje vaši krátkou práci u ka�
 
 - **Klipy:** hotová videa s přehrávačem, názvem, hookem a skóre. Jdou stáhnout.
 - **Fronta:** průběh zpracování a výběr momentů přes chat. Při chybě je tlačítko *Zkusit znovu*.
-- **To nebo to:** vyrobí od nuly svislá videa se hrou „To nebo to“ (nahoře modrá, dole červená možnost s obrázkem, namluvená otázka českým hlasem, odpočet 3, 2, 1, procenta pro zábavu a výzva do komentářů). Hlas (Microsoft Edge TTS) a loga značek (podle domény, z veřejné služby ikon webů) a obrázky (Noto Emoji, licence Apache 2.0) se stahují z internetu, bez nich video vznikne jen s textem. Zadáte téma, zkopírujete pokyny do chatu na claude.ai, odpověď vložíte zpět a aplikace videa vytvoří. Hotová videa najdete v záložce Klipy.
+- **To nebo to:** vyrobí od nuly svislá videa se hrou „To nebo to“ (nahoře modrá, dole červená možnost s obrázkem, namluvená otázka českým hlasem, odpočet 3, 2, 1, procenta pro zábavu a výzva do komentářů). Hlas (Microsoft Edge TTS) a loga značek (podle domény, z veřejné služby ikon webů) a obrázky (Noto Emoji, licence Apache 2.0) se stahují z internetu, bez nich video vznikne jen s textem. Zadáte jedno nebo více témat (jedno na řádek, pro hromadnou výrobu), zkopírujete pokyny do chatu na claude.ai, odpověď vložíte zpět a aplikace videa vytvoří. Hotová videa najdete v záložce Klipy.
 - **Kanály:** přidáte kanál podcastu a aplikace sama zpracuje každý nový díl (musí běžet).
-- **Nastavení:** jazyk, přesnost přepisu, počet a délka klipů, vzhled titulků.
+- **Nastavení:** jazyk, přesnost přepisu, typ hledaných klipů (podcast, hra „To nebo to“, záznam streamu), rozložení videa (podcast nebo hra nahoře a kamera dole), počet a délka klipů, styl titulků (zvýrazněné slovo, tmavý podklad, bez zvýraznění, jedno velké slovo) a volitelný klíč Pexels pro fotky.
 
 Zavřením okna prohlížeče aplikace neskončí, běží dál na pozadí. Vypnete ji tlačítkem *Ukončit aplikaci* dole.
 

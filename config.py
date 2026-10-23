@@ -9,7 +9,10 @@ DEFAULTS = {
     "whisper_device": "cpu",       # sestavená aplikace neobsahuje ovladače grafické karty
     "whisper_compute_type": "int8",
     "selection_mode": "manual",    # "manual" = ručně přes chat Claude (zdarma), "api" = automaticky přes API
-    "clip_style": "general",       # "general" nebo "thisorthat" (hra To nebo to)
+    "clip_style": "general",       # "general", "thisorthat" (hra To nebo to) nebo "stream"
+    "layout_mode": "auto",         # "auto" = podcast, "stream" = hra nahoře a kamera dole
+    "stream_cam_corner": "br",
+    "stream_cam_size": 26,
     "claude_model": "claude-sonnet-5-5",
     "clips_per_video": 6,
     "min_clip_seconds": 25,
@@ -25,6 +28,7 @@ DEFAULTS = {
         "size": 78,
         "uppercase": False,
         "words_per_line": 3,
+        "style": "karaoke",           # karaoke | box | plain | word
         "highlight_color": "FFD400",  # RGB hex aktuálně vyslovovaného slova
     },
 }

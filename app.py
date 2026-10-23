@@ -18,7 +18,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import config
 from downloader import list_channel_videos
@@ -40,8 +40,8 @@ app = Flask(__name__)
 
 # ----------------------------------------------------------------- nastavení
 
-INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min")
-STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style")
+INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size")
+STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner")
 
 
 def load_settings():
@@ -71,7 +71,7 @@ def build_cfg():
     cfg["output_dir"] = str(DATA / "Klipy")
     cfg["state_file"] = str(DATA / "state.json")
     s = load_settings()
-    for k in STR_KEYS + INT_KEYS[:3]:
+    for k in STR_KEYS + INT_KEYS[:3] + INT_KEYS[4:]:
         if s.get(k) not in (None, ""):
             cfg[k] = s[k]
     if "keep_source" in s:
@@ -79,8 +79,13 @@ def build_cfg():
     cfg["subtitles"].update(s.get("subtitles", {}))
     if cfg.get("selection_mode") not in ("manual", "api"):
         cfg["selection_mode"] = "manual"
-    if cfg.get("clip_style") not in ("general", "thisorthat"):
+    if cfg.get("clip_style") not in ("general", "thisorthat", "stream"):
         cfg["clip_style"] = "general"
+    if cfg.get("layout_mode") not in ("auto", "stream"):
+        cfg["layout_mode"] = "auto"
+    if cfg.get("stream_cam_corner") not in ("br", "bl", "tr", "tl"):
+        cfg["stream_cam_corner"] = "br"
+    cfg["stream_cam_size"] = max(10, min(50, int(cfg.get("stream_cam_size") or 26)))
     if cfg["clip_style"] == "thisorthat":  # krátké klipy: jedna otázka a reakce
         cfg["min_clip_seconds"] = min(cfg["min_clip_seconds"], 12)
         cfg["max_clip_seconds"] = min(cfg["max_clip_seconds"], 60)
@@ -170,7 +175,8 @@ def worker():
                     job.update(stage="Claude vymýšlí otázky", pct=3)
                     job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
-                                              job.get("voice", "antonin"), log, progress)
+                                              job.get("voice", "antonin"), log, progress,
+                                              pexels_key=load_settings().get("pexels_key"))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -288,7 +294,8 @@ def api_state():
         "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
-        "settings": {k: v for k, v in s.items() if k != "api_key"},
+        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pexels_key")},
+        "has_pexels_key": bool(s.get("pexels_key")),
         "defaults": build_cfg() | {"subtitles": build_cfg()["subtitles"]},
     })
 
@@ -364,20 +371,77 @@ def api_job_answers(jid):
             f"Žádný z vybraných momentů nemá vhodnou délku ({cfg['min_clip_seconds']}–{cfg['max_clip_seconds']} s) "
             "nebo se navzájem překrývají. Požádejte Claude o jiný výběr se správnou délkou.")), 400
     with jobs_lock:
-        job.update(phase="render", pending_clips=clips, status="queued", pct=60, error=None,
-                   stage="Čeká ve frontě (vytváření klipů)")
+        job.update(phase="review", pending_clips=clips, status="waiting", pct=58, error=None,
+                   stage="Čeká na vás: zkontrolujte vybrané klipy")
         _persist_jobs()
-    job_queue.put(jid)
     return jsonify(ok=True, clips=len(clips))
 
 
+@app.get("/api/jobs/<jid>/review")
+def api_job_review(jid):
+    job = jobs.get(jid)
+    if not job or job.get("phase") != "review" or job["status"] != "waiting":
+        abort(404)
+    info = job.get("info") or {}
+    return jsonify(clips=[{k: c.get(k) for k in ("title", "hook", "reason", "score", "start", "end")}
+                          for c in job.get("pending_clips") or []],
+                   has_video=bool(info.get("path")) and Path(info["path"]).exists())
+
+
+@app.get("/api/jobs/<jid>/source")
+def api_job_source(jid):
+    job = jobs.get(jid)
+    path = Path(((job or {}).get("info") or {}).get("path") or "")
+    if not job or job.get("phase") != "review" or not path.is_file():
+        abort(404)
+    return send_file(path, conditional=True)
+
+
+@app.post("/api/jobs/<jid>/render")
+def api_job_render(jid):
+    job = jobs.get(jid)
+    if not job or job.get("phase") != "review" or job["status"] != "waiting":
+        abort(404)
+    base = job.get("pending_clips") or []
+    duration = float((load_transcript(build_cfg(), job["info"]["id"]) or {}).get("duration") or 0)
+    chosen = []
+    for item in (request.json or {}).get("clips") or []:
+        try:
+            i = int(item["i"])
+            if not item.get("keep", True):
+                continue
+            start, end = float(item["start"]), float(item["end"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify(error="Neplatné hodnoty u klipu."), 400
+        if not 0 <= i < len(base):
+            continue
+        if duration:
+            end = min(end, duration)
+        if start < 0 or end - start < 3:
+            return jsonify(error=f"Klip {i + 1}: konec musí být aspoň 3 sekundy za začátkem."), 400
+        if end - start > 180:
+            return jsonify(error=f"Klip {i + 1} je delší než 3 minuty."), 400
+        chosen.append({**base[i], "start": round(start, 2), "end": round(end, 2),
+                       "title": str(item.get("title") or base[i]["title"]).strip()[:120] or base[i]["title"]})
+    if not chosen:
+        return jsonify(error="Ponechte aspoň jeden klip, nebo úlohu odeberte."), 400
+    with jobs_lock:
+        job.update(phase="render", pending_clips=chosen, status="queued", pct=60, error=None,
+                   stage="Čeká ve frontě (vytváření klipů)")
+        _persist_jobs()
+    job_queue.put(jid)
+    return jsonify(ok=True, clips=len(chosen))
+
+
 def _ton_params(data):
-    topic = str(data.get("topic") or "").strip()[:120]
+    topic = "\n".join(thisorthat.split_topics(data.get("topic")))[:600]
+    n_topics = max(1, len(thisorthat.split_topics(topic)))
     try:
         rounds = max(2, min(thisorthat.MAX_ROUNDS, int(data.get("rounds") or 6)))
-        videos = max(1, min(5, int(data.get("videos") or 1)))
+        videos = max(1, min(thisorthat.MAX_VIDEOS, int(data.get("videos") or 1)))
     except (TypeError, ValueError):
         rounds, videos = 6, 1
+    videos = max(1, min(videos, thisorthat.MAX_VIDEOS // n_topics))  # celkem nejvýše 20 videí
     return topic, rounds, videos
 
 
@@ -407,7 +471,8 @@ def api_ton_generate():
         topic = vids[0]["title"]
     if not topic:
         return jsonify(error="Napište téma."), 400
-    job = add_job("", title=f"To nebo to: {topic}", source="generátor", start=False)
+    shown = ", ".join(thisorthat.split_topics(topic))[:80]
+    job = add_job("", title=f"To nebo to: {shown}", source="generátor", start=False)
     voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "antonin"
     job.update(kind="ton", topic=topic, voice=voice, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
     job_queue.put(job["id"])
@@ -474,7 +539,17 @@ def api_save_settings():
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
         s.pop("api_key", None)
-    if "clip_style" in data and data["clip_style"] not in ("general", "thisorthat"):
+    if data.get("pexels_key") is not None and "pexels_key" in data:
+        key = str(data["pexels_key"]).strip()
+        if key:
+            s["pexels_key"] = key
+        elif data.get("clear_pexels_key"):
+            s.pop("pexels_key", None)
+    if "layout_mode" in data and data["layout_mode"] not in ("auto", "stream"):
+        return jsonify(error="Neznámé rozložení videa."), 400
+    if "stream_cam_corner" in data and data["stream_cam_corner"] not in ("br", "bl", "tr", "tl"):
+        return jsonify(error="Neznámá poloha kamery."), 400
+    if "clip_style" in data and data["clip_style"] not in ("general", "thisorthat", "stream"):
         return jsonify(error="Neznámý typ klipů."), 400
     if "selection_mode" in data and data["selection_mode"] not in ("manual", "api"):
         return jsonify(error="Neznámý způsob výběru momentů."), 400
@@ -502,6 +577,10 @@ def api_save_settings():
                 sub[k] = int(d[k])
         if "uppercase" in d:
             sub["uppercase"] = bool(d["uppercase"])
+        if "style" in d:
+            if d["style"] not in ("karaoke", "box", "plain", "word"):
+                return jsonify(error="Neznámý styl titulků."), 400
+            sub["style"] = d["style"]
     save_settings(s)
     build_cfg()
     return jsonify(ok=True, has_api_key=has_api_key())

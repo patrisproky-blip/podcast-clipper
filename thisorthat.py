@@ -7,6 +7,7 @@ import ssl
 import subprocess
 import tempfile
 import unicodedata
+import urllib.parse
 import urllib.request
 import uuid
 import wave
@@ -19,8 +20,30 @@ from platform_utils import ffmpeg_path, hidden_subprocess_kwargs, resource
 from selector import _loads_lenient
 
 W, H = 1080, 1920
-FONT_PATH = resource("assets", "DejaVuSansCondensed-Bold.ttf")
-FPS, COUNT_S, MAX_ROUNDS = 30, 3, 12
+FALLBACK_FONT = resource("assets", "DejaVuSansCondensed-Bold.ttf")
+ANTON_FONT = resource("assets", "Anton-Regular.ttf")
+_CZECH = "ěščřžýáíéúůďťňĚŠČŘŽÝÁÍÉÚŮĎŤŇóÓ"
+
+
+def _covers_czech(path):
+    """Ověří, že písmo umí všechny české znaky (nahrazující čtvereček se liší od skutečného znaku)."""
+    try:
+        f = ImageFont.truetype(str(path), 60)
+
+        def shot(ch):
+            im = Image.new("L", (90, 110), 0)
+            ImageDraw.Draw(im).text((10, 10), ch, font=f, fill=255)
+            return im.tobytes()
+
+        missing = shot("\uffff")
+        return all(shot(c) != missing and any(shot(c)) for c in _CZECH)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+FONT_PATH = ANTON_FONT if ANTON_FONT.exists() and _covers_czech(ANTON_FONT) else FALLBACK_FONT
+USING_ANTON = FONT_PATH == ANTON_FONT
+FPS, COUNT_S, MAX_ROUNDS, MAX_VIDEOS = 30, 3, 12, 20
 MIN_READ_S, MIN_REVEAL_S, END_S = 2.5, 2.4, 3.0
 
 RED, BLUE = (250, 40, 40), (10, 50, 250)   # horní půlka červená, spodní modrá (podle vzoru)
@@ -39,13 +62,23 @@ def _font(size):
 
 # ------------------------------------------------------------------ otázky
 
+def split_topics(topic):
+    """Témata oddělená novým řádkem nebo středníkem."""
+    items = [t.strip() for t in re.split(r"[\n;]+", str(topic or "")) if t.strip()]
+    return items[:MAX_VIDEOS] or []
+
+
 def build_prompt(topic, rounds, videos):
-    topic = (topic or "").strip() or "všeobecné"
+    topics = split_topics(topic) or ["všeobecné"]
+    if len(topics) == 1:
+        subject = f"Téma: {topics[0]}\nPočet videí: {videos}\n"
+    else:
+        subject = ("Témata (pro každé téma vytvoř samostatná videa):\n" + "\n".join(f"- {t}" for t in topics)
+                   + f"\nPočet videí na každé téma: {videos}\n")
     return (
         "Vymysli otázky do krátkých videí ve hře „To nebo to“ (anglicky „This or that“). "
         "V každé otázce si divák vybírá jednu ze dvou možností.\n\n"
-        f"Téma: {topic}\n"
-        f"Počet videí: {videos}\n"
+        f"{subject}"
         f"Počet otázek v každém videu: {rounds}\n\n"
         "Pravidla:\n"
         "- Piš česky, přirozeně. Každá možnost je v 1. pádu (nominativu), protože ji bude číst hlas.\n"
@@ -54,6 +87,7 @@ def build_prompt(topic, rounds, videos):
         "- Pokud je možnost značka, firma, aplikace, služba nebo hra (například McDonald's, Netflix, iPhone), "
         "uveď v poli la / lb její hlavní internetovou doménu (například mcdonalds.com), z ní se stáhne logo. "
         "U všeho ostatního nech doménu prázdnou.\n"
+        "- Ke každé možnosti dej do pole pa / pb anglické vyhledávací slovo pro fotku (1 až 3 slova, například pizza).\n"
         "- Ke každé možnosti bez domény přidej jeden emoji, který ji nejlépe vystihuje (bude z něj obrázek). "
         "Když žádný nesedí, dej prázdný řetězec.\n"
         "- Otázky se v rámci videí neopakují.\n"
@@ -61,8 +95,8 @@ def build_prompt(topic, rounds, videos):
         "- Každé video dostane krátký název (nejvýše 5 slov) a otázky jdou od lehčích ke zábavnějším.\n\n"
         "Odpověz POUZE jedním blokem kódu ve formátu JSON a nic dalšího nepiš. Formát:\n"
         "```json\n"
-        '{"videos": [{"title": "Jídlo", "rounds": [{"a": "Pizza", "la": "", "ea": "🍕", "b": "Burger", "lb": "", "eb": "🍔"}, '
-        '{"a": "Netflix", "la": "netflix.com", "ea": "", "b": "YouTube", "lb": "youtube.com", "eb": ""}]}]}\n'
+        '{"videos": [{"title": "Jídlo", "rounds": [{"a": "Pizza", "pa": "pizza", "la": "", "ea": "🍕", "b": "Burger", "pb": "burger", "lb": "", "eb": "🍔"}, '
+        '{"a": "Netflix", "pa": "", "la": "netflix.com", "ea": "", "b": "YouTube", "pb": "", "lb": "youtube.com", "eb": ""}]}]}\n'
         "```"
     )
 
@@ -117,7 +151,8 @@ def parse_questions(text):
                 a, b = _clean(r.get("a")), _clean(r.get("b"))
                 if a and b:
                     rounds.append({"a": a, "b": b, "ea": _emoji(r.get("ea")), "eb": _emoji(r.get("eb")),
-                                   "la": _domain(r.get("la")), "lb": _domain(r.get("lb"))})
+                                   "la": _domain(r.get("la")), "lb": _domain(r.get("lb")),
+                                   "pa": _clean(r.get("pa"), 40), "pb": _clean(r.get("pb"), 40)})
         if rounds:
             videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "rounds": rounds[:MAX_ROUNDS]})
     if not videos:
@@ -245,20 +280,68 @@ def _logo_card(domain, cache_dir, failed):
     return card
 
 
-def _pictures(rnd, cache_dir, failed):
-    """Pro každou možnost: logo značky, jinak emoji, jinak nic."""
+def _photo_card(query, cache_dir, key, failed):
+    """Fotka z Pexels (bezplatná licence) oříznutá na zaoblený obdélník. Potřebuje bezplatný klíč Pexels."""
+    query = (query or "").strip().lower()
+    if not key or not query or not cache_dir:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", query).strip("-")[:60]
+    path = Path(cache_dir) / "photos" / f"{slug}.jpg"
+    if not path.exists():
+        if "photo:" + slug in failed:
+            return None
+        try:
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except Exception:  # noqa: BLE001
+                ctx = ssl.create_default_context()
+            url = "https://api.pexels.com/v1/search?per_page=1&orientation=landscape&query=" + urllib.parse.quote(query)
+            req = urllib.request.Request(url, headers={"Authorization": key, "User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                photos = json.loads(r.read().decode("utf-8")).get("photos") or []
+            if not photos:
+                raise LookupError("žádná fotka")
+            with urllib.request.urlopen(urllib.request.Request(photos[0]["src"]["large"], headers={"User-Agent": "Mozilla/5.0"}),
+                                        timeout=20, context=ctx) as r:
+                data = r.read()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except Exception:  # noqa: BLE001
+            failed.add("photo:" + slug)
+            return None
+    try:
+        im = Image.open(path).convert("RGB")
+    except Exception:  # noqa: BLE001
+        return None
+    bw, bh = PIC_W, PIC
+    k = max(bw / im.width, bh / im.height)
+    im = im.resize((max(bw, int(im.width * k)), max(bh, int(im.height * k))), Image.LANCZOS)
+    left, top = (im.width - bw) // 2, (im.height - bh) // 2
+    im = im.crop((left, top, left + bw, top + bh)).convert("RGBA")
+    mask = Image.new("L", (bw, bh), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, bw - 1, bh - 1], radius=36, fill=255)
+    im.putalpha(mask)
+    return im
+
+
+def _pictures(rnd, cache_dir, failed, pexels_key=None):
+    """Pro každou možnost: logo značky, jinak fotka (když je klíč Pexels), jinak emoji, jinak nic."""
     out = []
     for side in ("a", "b"):
-        out.append(_logo_card(rnd.get("l" + side), cache_dir, failed) or _emoji_image(rnd.get("e" + side), cache_dir, failed))
+        out.append(_logo_card(rnd.get("l" + side), cache_dir, failed)
+                   or _photo_card(rnd.get("p" + side), cache_dir, pexels_key, failed)
+                   or _emoji_image(rnd.get("e" + side), cache_dir, failed))
     return tuple(out)
 
 
 # ------------------------------------------------------------------ vykreslení
 
-SX, SY = 0.78, 1.1   # písmo se zúží a prodlouží, aby působilo jako úzké tučné titulkové písmo
+SX, SY = (1.0, 1.0) if USING_ANTON else (0.78, 1.1)   # záložní písmo se zúží a prodlouží, aby se podobalo úzkému titulkovému
 MID = H // 2
 BAND = 16            # polovina výšky černého proužku mezi půlkami
-PIC = 430            # velikost obrázku
+PIC = 430            # výška obrázku
+PIC_W = 700          # nejvyšší šířka obrázku (fotky jsou širší)
 
 
 def _wrap(draw, text, font, max_w):
@@ -309,9 +392,10 @@ def _half(img, top_half, text, pic, pct, winner):
     sign = 1 if top_half else -1                     # směr od okraje ke středu
     edge = 40 if top_half else H - 40
     if pic is not None:
-        p = pic.resize((PIC, PIC), Image.LANCZOS)
-        y0 = edge if top_half else edge - PIC
-        img.paste(p, (cx - PIC // 2, y0), p)
+        k = min(PIC_W / pic.width, PIC / pic.height)
+        p = pic.resize((max(1, int(pic.width * k)), max(1, int(pic.height * k))), Image.LANCZOS)
+        y0 = edge + (PIC - p.height) // 2 if top_half else edge - PIC + (PIC - p.height) // 2
+        img.paste(p, (cx - p.width // 2, y0), p)
         text_c = edge + sign * (PIC + 110)
         _text_block(img, text, cx, text_c, W - 120, 200, start=170)
     else:
@@ -410,7 +494,7 @@ def _mix_and_write(path, total_s, events, voices):
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, pexels_key=None):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
     rounds, title = video["rounds"], video["title"]
     results = make_results(len(rounds))
@@ -443,7 +527,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print):
 
         used_phrases = []
         for i, (rnd, res) in enumerate(zip(rounds, results), 1):
-            pics = _pictures(rnd, cache_dir, failed_img)
+            pics = _pictures(rnd, cache_dir, failed_img, pexels_key)
             question = f"{rnd['a']}, nebo {rnd['b']}?"
             if i == 1:
                 question = "To nebo to? " + question
@@ -498,7 +582,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print):
         if res.returncode != 0:
             raise RuntimeError(f"ffmpeg selhal: {res.stderr.strip()[-300:]}")
     if failed_img:
-        log(f"Upozornění: {len(failed_img)} obrázků se nepodařilo stáhnout (potřebují internet), místo nich je jen text.")
+        log(f"Upozornění: {len(failed_img)} obrázků se nepodařilo stáhnout (internet nebo klíč Pexels), použilo se náhradní řešení.")
     return t
 
 
@@ -507,7 +591,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="antonin", log=print, progress=None):
+def generate(videos, topic, out_root, voice="antonin", log=print, progress=None, pexels_key=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -519,7 +603,7 @@ def generate(videos, topic, out_root, voice="antonin", log=print, progress=None)
         log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
         if progress:
             progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log)
+        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, pexels_key=pexels_key)
         first = v["rounds"][0]
         results.append({
             "file": name, "title": v["title"], "score": 0,

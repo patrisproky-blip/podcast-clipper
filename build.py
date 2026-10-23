@@ -66,6 +66,20 @@ def prepare_deno():
     print(subprocess.run([str(exe), "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0])
 
 
+def prepare_font():
+    """Úzké tučné písmo Anton (licence SIL OFL) pro videa To nebo to. Když se nestáhne, použije se záložní písmo."""
+    base = "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/"
+    try:
+        for name in ("Anton-Regular.ttf", "OFL.txt"):
+            with urllib.request.urlopen(base + name, timeout=60) as r:
+                data = r.read()
+            dst = ROOT / "assets" / ("Anton-Regular.ttf" if name.endswith("ttf") else "Anton-OFL.txt")
+            dst.write_bytes(data)
+        print("Anton font downloaded.")
+    except Exception as e:  # noqa: BLE001
+        print(f"Warning: Anton font not downloaded, fallback font will be used ({e}).")
+
+
 def has(mod):
     return importlib.util.find_spec(mod) is not None
 
@@ -76,6 +90,7 @@ def main():
     BUILD_BIN.mkdir()
     prepare_ffmpeg()
     prepare_deno()
+    prepare_font()
 
     sep = os.pathsep
     args = [

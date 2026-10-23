@@ -129,12 +129,50 @@ def _compose(frame, layout, centers):
     return np.vstack([top, bot])
 
 
+STREAM_SPLIT = 1000   # výška, kde končí hra a začíná kamera
+
+
+def _cam_box(W, H, cfg):
+    """Obdélník s kamerou ve zdrojovém obrazu podle nastavení (roh a šířka v procentech)."""
+    cw = int(W * max(10, min(50, int(cfg.get("stream_cam_size", 26)))) / 100)
+    ch = int(cw * 0.75)
+    corner = cfg.get("stream_cam_corner", "br")
+    x = W - cw if corner in ("br", "tr") else 0
+    y = H - ch if corner in ("br", "bl") else 0
+    return x, y, cw, min(ch, H)
+
+
+def _compose_stream(frame, cfg):
+    """Hra nahoře (na šířku, s rozmazaným pozadím), kamera dole (oříznutý výřez ze zdrojového obrazu)."""
+    H, W = frame.shape[:2]
+    cw = min(W, int(H * 9 / 16))
+    x0 = (W - cw) // 2
+    small = cv2.resize(frame[:, x0:x0 + cw], (54, 96), interpolation=cv2.INTER_AREA)
+    bg = cv2.resize(cv2.GaussianBlur(small, (0, 0), 3), (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
+    bg = (bg * 0.55).astype(np.uint8)
+
+    gh = int(OUT_W * H / W)
+    game = cv2.resize(frame, (OUT_W, gh), interpolation=cv2.INTER_AREA)
+    gy = max(0, (STREAM_SPLIT - gh) // 2)
+    bg[gy:gy + gh] = game[: OUT_H - gy]
+
+    cx, cy, bw, bh = _cam_box(W, H, cfg)
+    cam = frame[cy:cy + bh, cx:cx + bw]
+    area_h = OUT_H - STREAM_SPLIT
+    k = max(OUT_W / cam.shape[1], area_h / cam.shape[0])
+    cam = cv2.resize(cam, (int(cam.shape[1] * k) + 1, int(cam.shape[0] * k) + 1), interpolation=cv2.INTER_CUBIC)
+    ox, oy = (cam.shape[1] - OUT_W) // 2, (cam.shape[0] - area_h) // 2
+    bg[STREAM_SPLIT:] = cam[oy:oy + area_h, ox:ox + OUT_W]
+    cv2.line(bg, (0, STREAM_SPLIT), (OUT_W, STREAM_SPLIT), (0, 0, 0), 6)
+    return bg
+
+
 # ---------------------------------------------------------------- titulky (kreslené Pillow)
 
 def build_caption_states(words, clip_start, clip_end, sc):
     """Vrátí seřazený seznam (start, end, [slova skupiny], index zvýrazněného slova) v čase klipu."""
     ws = [w for w in words if w["start"] >= clip_start - 0.05 and w["end"] <= clip_end + 0.05]
-    per = max(1, int(sc["words_per_line"]))
+    per = 1 if sc.get("style") == "word" else max(1, int(sc["words_per_line"]))
 
     groups, cur = [], []
     for w in ws:
@@ -179,7 +217,8 @@ def _font(size):
 
 def render_caption(texts, active, sc):
     """Nakreslí jeden řádek titulků. Vrátí (BGR*alfa jako uint16, 255-alfa jako uint16)."""
-    size = int(sc["size"])
+    style = sc.get("style", "karaoke")
+    size = int(sc["size"] * (1.45 if style == "word" else 1))
     max_w = OUT_W - 120
     while True:
         font = _font(size)
@@ -189,12 +228,14 @@ def render_caption(texts, active, sc):
         if total <= max_w or size <= 30:
             break
         size -= 4
-    stroke = max(3, round(size * 0.09))
-    pad = stroke + 8
+    stroke = max(2, round(size * 0.05)) if style == "box" else max(3, round(size * 0.09))
+    pad = stroke + (22 if style == "box" else 8)
     ascent, descent = font.getmetrics()
     img = Image.new("RGBA", (int(total) + 2 * pad, ascent + descent + 2 * pad), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    hi = _hex_to_rgba(sc["highlight_color"])
+    if style == "box":
+        draw.rounded_rectangle([0, 0, img.width - 1, img.height - 1], radius=30, fill=(0, 0, 0, 175))
+    hi = (255, 255, 255, 255) if style == "plain" else _hex_to_rgba(sc["highlight_color"])
     x = pad
     for k, t in enumerate(texts):
         draw.text((x, pad), t, font=font, fill=hi if k == active else (255, 255, 255, 255),
@@ -209,7 +250,10 @@ def render_caption(texts, active, sc):
 def blend_caption(frame, premul, inv_alpha, layout):
     h, w = premul.shape[:2]
     x0 = (OUT_W - w) // 2
-    y0 = (OUT_H // 2 - h // 2) if layout == "split" else (OUT_H - 430 - h)
+    if layout == "stream":
+        y0 = STREAM_SPLIT - h // 2
+    else:
+        y0 = (OUT_H // 2 - h // 2) if layout == "split" else (OUT_H - 430 - h)
     xs, ys = max(0, x0), max(0, y0)
     xe, ye = min(OUT_W, x0 + w), min(OUT_H, y0 + h)
     if xe <= xs or ye <= ys:
@@ -236,9 +280,12 @@ def render_clip(src, clip, words, cfg, out_path):
         n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 
-        times, faces_per = analyze_faces(cap, fps, n_frames)
-        layout = choose_layout(faces_per, W)
-        track = build_tracks(times, faces_per, W, layout)
+        if cfg.get("layout_mode") == "stream":
+            layout, track = "stream", None
+        else:
+            times, faces_per = analyze_faces(cap, fps, n_frames)
+            layout = choose_layout(faces_per, W)
+            track = build_tracks(times, faces_per, W, layout)
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
         states = build_caption_states(words, clip["start"], clip["end"], cfg["subtitles"])
@@ -263,7 +310,10 @@ def render_clip(src, clip, words, cfg, out_path):
                 if not ok:
                     break
                 t = i / fps
-                composed = np.ascontiguousarray(_compose(frame, layout, track(t)))
+                if layout == "stream":
+                    composed = np.ascontiguousarray(_compose_stream(frame, cfg))
+                else:
+                    composed = np.ascontiguousarray(_compose(frame, layout, track(t)))
                 k = bisect.bisect_right(starts, t) - 1
                 if k >= 0 and t < states[k][1]:
                     if k != cur_idx:
