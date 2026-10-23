@@ -236,8 +236,9 @@ a:hover{text-decoration:underline}
         <div class="field"><label for="s_language">Jazyk podcastu</label>
           <select id="s_language"><option value="cs">Čeština</option><option value="sk">Slovenština</option><option value="en">Angličtina</option><option value="de">Němčina</option><option value="pl">Polština</option><option value="auto">Automaticky</option></select></div>
         <div class="field"><label for="s_whisper_model">Přesnost přepisu</label>
-          <select id="s_whisper_model"><option value="large-v3">Nejvyšší (large-v3) – potřebuje grafickou kartu</option><option value="medium">Vysoká (medium)</option><option value="small">Střední (small) – rychlé na běžném PC</option><option value="base">Nízká (base)</option></select>
-          <div class="hint">Bez grafické karty zvol „small“ nebo „medium“.</div></div>
+          <select id="s_whisper_model"><option value="auto">Automaticky podle výkonu a délky videa (doporučeno)</option><option value="turbo">Velmi vysoká (turbo)</option><option value="medium">Vysoká (medium)</option><option value="small">Střední (small) – rychlé na běžném PC</option><option value="base">Nízká (base)</option><option value="large-v3">Nejvyšší (large-v3) – velmi pomalé bez grafické karty</option></select>
+          <div class="hint">Automatika vybere nejpřesnější model, který se podle vašeho procesoru stihne v limitu níže. Po prvním přepisu si změří skutečnou rychlost.</div></div>
+        <div class="field" id="maxtrfield"><label for="s_max_tr">Nejdelší přijatelný přepis (minuty)</label><input id="s_max_tr" type="number" min="5" max="600"><div class="hint">Platí pro automatiku. Větší číslo znamená přesnější model u dlouhých videí.</div></div>
       </div>
 
       <h2 class="sec">Klipy</h2>
@@ -487,7 +488,7 @@ function fillSettings(force){
   if(!state || (settingsLoaded && !force)) return;
   const d=state.defaults, s=state.settings, sub=d.subtitles;
   const v=(k)=>s[k] ?? d[k];
-  $("s_selection_mode").value=v("selection_mode")||"manual"; $("s_clip_style").value=v("clip_style")||"general"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model");
+  $("s_selection_mode").value=v("selection_mode")||"manual"; $("s_clip_style").value=v("clip_style")||"general"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model")||"auto"; $("s_max_tr").value=v("max_transcribe_minutes")||45; $("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto");
   $("s_clips_per_video").value=v("clips_per_video"); $("s_min_clip_seconds").value=v("min_clip_seconds");
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
   $("s_keep_source").checked=!!v("keep_source");
@@ -499,7 +500,7 @@ function fillSettings(force){
 }
 async function saveSettings(){
   const body={
-    selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, layout_mode:$("s_layout_mode").value, stream_cam_corner:$("s_cam_corner").value, stream_cam_size:$("s_cam_size").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value,
+    selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, layout_mode:$("s_layout_mode").value, stream_cam_corner:$("s_cam_corner").value, stream_cam_size:$("s_cam_size").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value, max_transcribe_minutes:$("s_max_tr").value,
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
     keep_source:$("s_keep_source").checked,
@@ -525,6 +526,7 @@ async function refresh(){
   lastDone=done;
   setTimeout(refresh, active?2000:6000);
 }
+$("s_whisper_model").addEventListener("change",()=>$("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto"));
 $("s_layout_mode").addEventListener("change",()=>$("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"));
 $("s_selection_mode").addEventListener("change",()=>$("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"));
 refresh(); loadClips();

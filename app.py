@@ -40,7 +40,7 @@ app = Flask(__name__)
 
 # ----------------------------------------------------------------- nastavení
 
-INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size")
+INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size", "max_transcribe_minutes")
 STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner")
 
 
@@ -768,6 +768,12 @@ def selftest():
         import aiohttp  # noqa: F401
         return "edge-tts načten (samotný hlas potřebuje internet)"
 
+    def t_model_choice():
+        import transcriber
+        m, est = transcriber.choose_model({"whisper_model": "auto", "work_dir": str(DATA / "work"), "max_transcribe_minutes": 45}, 3600)
+        assert m in transcriber.AUTO_ORDER, "automatický výběr modelu selhal"
+        return f"1 h záznam: model {m}, odhad {est:.0f} min, vláken {transcriber._threads()}"
+
     def t_anthropic():
         import anthropic
         import selector  # noqa: F401
@@ -805,6 +811,7 @@ def selftest():
     check("ruční výběr momentů", t_manual)
     check("video To nebo to", t_ton)
     check("hlas (edge-tts)", t_voice_lib)
+    check("výběr modelu přepisu", t_model_choice)
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
     check("zkušební render klipu", t_render)

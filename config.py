@@ -5,7 +5,8 @@ import yaml
 
 DEFAULTS = {
     "language": "cs",              # "cs", "en", ... nebo "auto"
-    "whisper_model": "small",      # "large-v3" je nejpřesnější, ale bez grafické karty velmi pomalý
+    "whisper_model": "auto",       # "auto" vybere model podle výkonu a délky videa; jinak turbo, medium, small, base, large-v3
+    "max_transcribe_minutes": 45,  # u režimu auto: nejdelší přijatelná doba přepisu
     "whisper_device": "cpu",       # sestavená aplikace neobsahuje ovladače grafické karty
     "whisper_compute_type": "int8",
     "selection_mode": "manual",    # "manual" = ručně přes chat Claude (zdarma), "api" = automaticky přes API

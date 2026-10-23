@@ -43,6 +43,7 @@ Nezačínej uprostřed myšlenky ani slovy typu "no a tak..." či odpovědí bez
 - Hodnota: silný příběh, kontroverzní názor, konkrétní rada, vtip, emoce nebo zajímavé číslo/fakt.
 - Délka přesně v zadaném rozmezí, časy `start` a `end` v sekundách podle časových značek v přepisu.
 - Klipy se nesmí překrývat.
+- Úseky označené [hlasitě] mají výrazně zvýšenou hlasitost zvuku (smích, výkřiky, důraz). Bývají zajímavé, ale vybírej je jen když dávají smysl i obsahem.
 - Nevymýšlej nic, co v přepisu není. Název a hook piš česky, přirozeně, bez clickbaitových lží."""
 
 RULES_TON = """Jsi zkušený střihač krátkých vertikálních videí (TikTok, YouTube Shorts, Instagram Reels) \
@@ -55,6 +56,7 @@ Pravidla výběru:
 - Klip pokračuje odpověďmi a vtipnými nebo překvapivými reakcemi a končí po dokončené reakci na poslední odpověď, ne uprostřed věty.
 - Jedna otázka = jeden klip. Když hra pokračuje další otázkou, začni nový klip. Jen když jsou otázky velmi krátké, můžeš spojit dvě až tři za sebou.
 - Vyber nejzábavnější otázky: kontroverzní volby, silné reakce, neshoda mezi hosty, překvapivé nebo vtipné odpovědi. Nudné nebo bez reakce vynech.
+- Značka [hlasitě] u věty znamená zvýšenou hlasitost, často smích nebo silnou reakci.
 - Pokud v přepisu žádná taková hra není, vrať prázdný seznam. Nevymýšlej nic, co v přepisu není.
 - Časy `start` a `end` v sekundách podle časových značek v přepisu. Klipy se nesmí překrývat. Název piš česky, krátký, ve tvaru dvou možností (například „Pizza nebo burger?“)."""
 
@@ -69,6 +71,7 @@ reakce na donate nebo chat, neočekávaný zvrat.
 - Klip končí dokončenou reakcí nebo pointou, ne uprostřed věty.
 - Přepis je u hlasité hry nepřesný a obsahuje mezery. Když je v přepisu náhlá hustá série krátkých slov nebo výkřiků, \
 bývá to zajímavé místo.
+- Úseky označené [hlasitě] mají výrazně zvýšenou hlasitost zvuku. U streamu to bývá nejlepší vodítko k emocím a vyvrcholení.
 - Nepoužívej úseky, kde se jen mlčí nebo se řeší technické problémy.
 - Délka v zadaném rozmezí, časy `start` a `end` v sekundách podle časových značek v přepisu. Klipy se nesmí překrývat.
 - Nevymýšlej nic, co v přepisu není. Název a hook piš česky, přirozeně, bez clickbaitových lží."""
@@ -95,10 +98,15 @@ def _sentence_units(transcript):
     if not words:
         return transcript["segments"]
     units, cur = [], []
+    loud = set(transcript.get("loud") or [])
 
     def flush():
         if cur:
-            units.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": " ".join(w["w"] for w in cur)})
+            a, b = int(cur[0]["start"]), int(cur[-1]["end"])
+            secs = range(a, b + 1)
+            hot = sum(1 for s in secs if s in loud)
+            units.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": " ".join(w["w"] for w in cur),
+                          "loud": bool(loud) and hot >= max(1, 0.4 * len(secs))})
             cur.clear()
 
     for w in words:
@@ -126,7 +134,7 @@ def _chunks(segments, chunk_s, overlap_s=60.0):
 
 
 def _format(part):
-    return "\n".join(f"[{s['start']:.1f}] {s['text']}" for s in part)
+    return "\n".join(f"[{s['start']:.1f}]{' [hlasitě]' if s.get('loud') else ''} {s['text']}" for s in part)
 
 
 def _ask(client, cfg, text, n):

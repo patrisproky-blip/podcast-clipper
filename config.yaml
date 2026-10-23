@@ -2,7 +2,8 @@
 # Co tu není, bere se z výchozích hodnot v config.py.
 
 language: cs                 # jazyk podcastu ("cs", "en", ... nebo "auto")
-whisper_model: small         # "medium" je přesnější; "large-v3" je nejlepší, ale potřebuje grafickou kartu
+whisper_model: auto          # auto = podle výkonu počítače a délky videa; nebo turbo, medium, small, base, large-v3
+max_transcribe_minutes: 45   # u režimu auto: nejdelší přijatelná doba přepisu
 whisper_device: cpu          # sestavená aplikace běží na procesoru
 
 selection_mode: manual       # manual = ručně přes chat Claude (zdarma), api = automaticky přes API klíč

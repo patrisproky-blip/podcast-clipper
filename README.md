@@ -56,7 +56,8 @@ Vaše data (nastavení vč. API klíče, rozpracovaná videa a hotové klipy) js
 
 ## Tipy a omezení
 
-- Přepis běží na procesoru. Zvolte přesnost „small“ nebo „medium“, „large-v3“ je velmi pomalý.
+- Přepis běží na procesoru. Výchozí „automaticky“ vybere nejpřesnější model, který se podle vašeho procesoru a délky videa stihne v časovém limitu (výchozí 45 minut), a po prvním přepisu si změří skutečnou rychlost. První použití většího modelu stáhne soubor o velikosti asi 1 až 2 GB.
+- Z hlasitosti zvuku se označují místa se smíchem, výkřiky a důrazem, což Claude pomáhá najít zajímavé momenty.
 - Klipy se snaží začínat a končit na hranici věty a hlasitost se u každého klipu vyrovnává. Stahování se při výpadku opakuje.
 - Obličeje hledá přesnější detektor YuNet (když se při sestavení stáhne, jinak starší záložní detektor).
 - Rozpoznání obličeje jen vystředí obraz na mluvčího, nepozná, kdo zrovna mluví. U dvou lidí vedle sebe se použije rozdělená obrazovka.

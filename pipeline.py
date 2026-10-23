@@ -49,7 +49,18 @@ def prepare_video(url, cfg, log=print, progress=None):
     transcript = transcribe(
         info["path"], cfg, transcript_path(cfg, vid),
         progress=lambda f: prog(15 + int(40 * f), "Přepisuji řeč"),
+        duration=info.get("duration"), log=log,
     )
+    if "loud" not in transcript:
+        try:
+            from audioenergy import loud_seconds, loudness_per_second
+            prog(55, "Hledám hlasitá místa")
+            transcript["loud"] = loud_seconds(loudness_per_second(info["path"]))
+            transcript_path(cfg, vid).write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
+            log(f"Hlasitá místa: {len(transcript['loud'])} s")
+        except Exception as e:  # noqa: BLE001
+            transcript["loud"] = []
+            log(f"Hlasitost zvuku se nepodařilo změřit ({type(e).__name__}), výběr poběží jen podle textu.")
     return info, transcript
 
 
