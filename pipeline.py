@@ -70,6 +70,9 @@ def render_clips(info, transcript, clips, cfg, log=print, progress=None):
         log(f"Renderuji {i}/{len(clips)}: {clip['title']} ({clip['start']:.0f}–{clip['end']:.0f} s)")
         prog(65 + int(33 * (i - 1) / len(clips)), f"Vytvářím klip {i} z {len(clips)}")
         layout = render_clip(info["path"], clip, words, cfg, out_dir / name)
+        if i == 1:
+            import renderer
+            log(f"Rozložení: {layout}, detekce tváří: {renderer.DETECTOR}")
         results.append({
             **clip,
             "file": name,

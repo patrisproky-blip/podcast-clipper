@@ -1,4 +1,5 @@
 """Výběr nejlepších momentů z přepisu: přes Claude API, nebo ručně přes chat."""
+import bisect
 import json
 import math
 import re
@@ -81,6 +82,35 @@ def rules(cfg):
 SYSTEM = RULES + "\nVrať výsledek voláním nástroje submit_clips."
 
 
+_END_CHARS = (".", "?", "!", "…")
+
+
+def _ends_sentence(word):
+    return word["w"].rstrip("\"'”“»)]").endswith(_END_CHARS)
+
+
+def _sentence_units(transcript):
+    """Rozdělí přepis na věty s přesnými časy (podle slov). Claude pak vybírá z jemnějších úseků než celých segmentů."""
+    words = all_words(transcript)
+    if not words:
+        return transcript["segments"]
+    units, cur = [], []
+
+    def flush():
+        if cur:
+            units.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": " ".join(w["w"] for w in cur)})
+            cur.clear()
+
+    for w in words:
+        if cur and w["start"] - cur[-1]["end"] > 1.2:
+            flush()
+        cur.append(w)
+        if _ends_sentence(w) or len(cur) >= 45:
+            flush()
+    flush()
+    return units
+
+
 def _chunks(segments, chunk_s, overlap_s=60.0):
     if not segments:
         return []
@@ -119,14 +149,65 @@ def _ask(client, cfg, text, n):
     return []
 
 
-def _snap(clip, words, duration):
-    """Přichytí začátek/konec na hranice slov a přidá drobnou rezervu."""
+def _nearest(values, x):
+    i = bisect.bisect_left(values, x)
+    if i == 0:
+        return 0
+    if i >= len(values):
+        return len(values) - 1
+    return i if abs(values[i] - x) < abs(values[i - 1] - x) else i - 1
+
+
+def _fit_sentences(si, ei, words, lo_len, hi_len):
+    """Posune začátek na začátek věty a konec na konec věty (v rozumných mezích), aby myšlenka byla celá."""
+    def sent_start(i):
+        return i <= 0 or _ends_sentence(words[i - 1]) or words[i]["start"] - words[i - 1]["end"] > 1.0
+
+    def sent_end(i):
+        return i >= len(words) - 1 or _ends_sentence(words[i]) or words[i + 1]["start"] - words[i]["end"] > 1.0
+
+    length = lambda a, b: words[b]["end"] - words[a]["start"]  # noqa: E731
+
+    if not sent_start(si):
+        j = si
+        while j > 0 and not sent_start(j):
+            j -= 1
+        if words[si]["start"] - words[j]["start"] <= 6.0 and length(j, ei) <= hi_len:
+            si = j
+        else:
+            k = si
+            while k < ei and not sent_start(k):
+                k += 1
+            if sent_start(k) and words[k]["start"] - words[si]["start"] <= 5.0 and length(k, ei) >= lo_len:
+                si = k
+    if not sent_end(ei):
+        j = ei
+        while j < len(words) - 1 and not sent_end(j):
+            j += 1
+        if sent_end(j) and words[j]["end"] - words[ei]["end"] <= 8.0 and length(si, j) <= hi_len:
+            ei = j
+        else:
+            k = ei
+            while k > si and not sent_end(k):
+                k -= 1
+            if sent_end(k) and words[ei]["end"] - words[k]["end"] <= 8.0 and length(si, k) >= lo_len:
+                ei = k
+    return si, ei
+
+
+def _snap(clip, words, duration, cfg=None, starts=None, ends=None):
+    """Přichytí začátek/konec na hranice slov a vět a přidá drobnou rezervu."""
     if not words:
         return clip
-    s = min(words, key=lambda w: abs(w["start"] - clip["start"]))
-    e = min(words, key=lambda w: abs(w["end"] - clip["end"]))
-    start = max(0.0, s["start"] - 0.15)
-    end = min(duration, e["end"] + 0.35)
+    starts = starts or [w["start"] for w in words]
+    ends = ends or [w["end"] for w in words]
+    si, ei = _nearest(starts, clip["start"]), _nearest(ends, clip["end"])
+    if ei < si:
+        ei = si
+    if cfg:
+        si, ei = _fit_sentences(si, ei, words, cfg["min_clip_seconds"] - 3, cfg["max_clip_seconds"] + 5)
+    start = max(0.0, words[si]["start"] - 0.15)
+    end = min(duration, words[ei]["end"] + 0.35)
     return {**clip, "start": round(start, 2), "end": round(end, 2)}
 
 
@@ -145,9 +226,10 @@ def finalize(candidates, transcript, cfg):
     words = all_words(transcript)
     duration = transcript.get("duration") or (segments[-1]["end"] if segments else 0)
 
+    starts, ends = [w["start"] for w in words], [w["end"] for w in words]
     ok = []
     for c in candidates:
-        c = _snap(c, words, duration)
+        c = _snap(c, words, duration, cfg, starts, ends)
         length = c["end"] - c["start"]
         if cfg["min_clip_seconds"] - 3 <= length <= cfg["max_clip_seconds"] + 5:
             ok.append(c)
@@ -165,7 +247,7 @@ def finalize(candidates, transcript, cfg):
 
 def select_moments(transcript, cfg):
     """Automatický výběr přes Claude API (potřebuje API klíč s kreditem)."""
-    chunks = _chunks(transcript["segments"], cfg["chunk_minutes"] * 60)
+    chunks = _chunks(_sentence_units(transcript), cfg["chunk_minutes"] * 60)
     if not chunks:
         return []
 
@@ -193,7 +275,7 @@ def _fmt_time(sec):
 
 def build_prompts(transcript, cfg):
     """Připraví texty, které uživatel vloží do chatu s Claude. Jeden text na každou část přepisu."""
-    chunks = _chunks(transcript["segments"], cfg["chunk_minutes"] * 60)
+    chunks = _chunks(_sentence_units(transcript), cfg["chunk_minutes"] * 60)
     n = _per_chunk(cfg, len(chunks))
     out = []
     for part in chunks:

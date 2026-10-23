@@ -25,7 +25,8 @@ def _friendly(exc):
 
 def _base_opts():
     setup_environment()
-    opts = {"quiet": True, "no_warnings": True, "noprogress": True, "logger": None}
+    opts = {"quiet": True, "no_warnings": True, "noprogress": True, "logger": None,
+            "retries": 8, "fragment_retries": 8, "extractor_retries": 3, "socket_timeout": 30}
     b = bin_dir()
     if b:
         opts["ffmpeg_location"] = str(b)
@@ -77,6 +78,7 @@ def download_video(url, work_dir, max_height=1080, on_progress=None):
     opts = _base_opts() | {
         "format": f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b",
         "merge_output_format": "mp4",
+        "format_sort": ["res", "vcodec:h264", "acodec:aac"],  # při stejném rozlišení raději h264 (rychlejší a spolehlivé čtení)
         "outtmpl": str(work / "%(id)s.%(ext)s"),
         "noplaylist": True,
         "progress_hooks": [hook],

@@ -57,6 +57,8 @@ Vaše data (nastavení vč. API klíče, rozpracovaná videa a hotové klipy) js
 ## Tipy a omezení
 
 - Přepis běží na procesoru. Zvolte přesnost „small“ nebo „medium“, „large-v3“ je velmi pomalý.
+- Klipy se snaží začínat a končit na hranici věty a hlasitost se u každého klipu vyrovnává. Stahování se při výpadku opakuje.
+- Obličeje hledá přesnější detektor YuNet (když se při sestavení stáhne, jinak starší záložní detektor).
 - Rozpoznání obličeje jen vystředí obraz na mluvčího, nepozná, kdo zrovna mluví. U dvou lidí vedle sebe se použije rozdělená obrazovka.
 - YouTube občas blokuje stahování. Když stahování selže, zkuste to později. YouTube se mění často, může být potřeba program znovu sestavit s novější verzí `yt-dlp` (v záložce *Actions* stačí znovu spustit *Run workflow*).
 - Klipy z cizích podcastů vyžadují svolení autora.

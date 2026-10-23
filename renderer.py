@@ -34,9 +34,46 @@ def cut_segment(src, start, end, dst):
 
 # ---------------------------------------------------------------- detekce tváří
 
+DETECTOR = "žádný"          # který detektor se naposledy použil (do podrobností úlohy)
+YUNET_MODEL = resource("assets", "face_detection_yunet_2023mar.onnx")
+
+
+def _yunet():
+    """Přesnější detektor tváří YuNet (model se stáhne při sestavení). Když chybí nebo selže, použije se Haar."""
+    try:
+        if YUNET_MODEL.exists() and hasattr(cv2, "FaceDetectorYN") and YUNET_MODEL.stat().st_size > 50_000:
+            return cv2.FaceDetectorYN.create(str(YUNET_MODEL), "", (640, 360), 0.6, 0.3, 500)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def analyze_faces(cap, fps, n_frames, step_s=0.5):
+    global DETECTOR
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    det = _yunet()
+    if det is not None:
+        scale = 640.0 / W
+        sh = int(H * scale)
+        step = max(1, int(fps * step_s))
+        times, faces_per = [], []
+        try:
+            det.setInputSize((640, sh))
+            for i in range(0, n_frames, step):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+                ok, fr = cap.read()
+                if not ok:
+                    break
+                _, found = det.detect(cv2.resize(fr, (640, sh)))
+                faces_per.append([] if found is None else
+                                 [((f[0] + f[2] / 2) / scale, (f[1] + f[3] / 2) / scale, f[2] / scale) for f in found])
+                times.append(i / fps)
+            DETECTOR = "YuNet"
+            return times, faces_per
+        except Exception:  # noqa: BLE001
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)   # selhalo: pokračuje se klasickým detektorem
+    DETECTOR = "Haar"
     if not hasattr(cv2, "CascadeClassifier"):
         # OpenCV 5 detektor tváří nemá; střih se udělá na střed obrazu.
         print("Upozornění: tato verze OpenCV nemá detektor tváří (nainstaluj opencv-python-headless<5). "
@@ -296,8 +333,9 @@ def render_clip(src, clip, words, cfg, out_path):
             "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OUT_W}x{OUT_H}", "-r", f"{fps:.5f}", "-i", "-",
             "-i", str(seg),
             "-map", "0:v", "-map", "1:a?",
+            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",   # vyrovnaná hlasitost jako na sociálních sítích
             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart",
             str(out_path),
         ]
         errlog = open(tmp / "ffmpeg.log", "w+", encoding="utf-8", errors="replace")

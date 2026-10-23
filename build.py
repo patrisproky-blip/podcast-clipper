@@ -80,6 +80,24 @@ def prepare_font():
         print(f"Warning: Anton font not downloaded, fallback font will be used ({e}).")
 
 
+def prepare_yunet():
+    """Přesný detektor tváří YuNet (licence MIT). Když se nestáhne, použije se záložní detektor."""
+    url = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+    dst = ROOT / "assets" / "face_detection_yunet_2023mar.onnx"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            data = r.read()
+        if len(data) < 50_000 or data.startswith(b"version https://git-lfs"):
+            raise ValueError("stažený soubor není model")
+        dst.write_bytes(data)
+        import cv2
+        cv2.FaceDetectorYN.create(str(dst), "", (320, 320), 0.6, 0.3, 500)  # ověření, že se model načte
+        print("YuNet face model downloaded.")
+    except Exception as e:  # noqa: BLE001
+        dst.unlink(missing_ok=True)
+        print(f"Warning: YuNet model not available, fallback detector will be used ({e}).")
+
+
 def has(mod):
     return importlib.util.find_spec(mod) is not None
 
@@ -91,6 +109,7 @@ def main():
     prepare_ffmpeg()
     prepare_deno()
     prepare_font()
+    prepare_yunet()
 
     sep = os.pathsep
     args = [
