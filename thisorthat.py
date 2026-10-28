@@ -4,9 +4,11 @@ import io
 import json
 import random
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
+import time
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -551,6 +553,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
     seq, events, voices = [], [], []
     failed_img = set()
     voice_name = VOICES.get(voice or "off")
+    voice_fails = [0]  # po sobě jdoucí selhání; hlas se vypne až po třech
     voice_ok = [bool(voice_name)]
     t = 0.0
 
@@ -561,14 +564,21 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             """Vrátí (pole vzorků, délka) nebo (None, 0), když hlas není nebo selhal."""
             if not voice_ok[0]:
                 return None, 0.0
-            try:
-                arr = synth(text, voice_name, tmp, name)
-                return arr, len(arr) / SR
-            except Exception as e:  # noqa: BLE001
+            last = None
+            for attempt in range(3):
+                try:
+                    arr = synth(text, voice_name, tmp, name)
+                    voice_fails[0] = 0
+                    return arr, len(arr) / SR
+                except Exception as e:  # noqa: BLE001
+                    last = e
+                    time.sleep(1.0 + attempt * 1.5)
+            voice_fails[0] += 1
+            log(f"Upozornění: větu „{text[:40]}“ se nepodařilo namluvit ({type(last).__name__}: {last}).")
+            if voice_fails[0] >= 3:
                 voice_ok[0] = False
-                log(f"Upozornění: hlas se nepodařilo vytvořit, video bude bez namluvení ({type(e).__name__}: {e}). "
-                    "Hlas potřebuje připojení k internetu.")
-                return None, 0.0
+                log("Hlas se opakovaně nepodařilo vytvořit, zbytek videa bude bez namluvení. Hlas potřebuje internet.")
+            return None, 0.0
 
         def add(img, dur):
             p = tmp / f"f{len(seq):03d}.png"
@@ -646,7 +656,7 @@ def generate(videos, topic, out_root, voice="antonin", log=print, progress=None,
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir = Path(out_root).parent / "work" / "emoji"
+    cache_dir = Path(out_root).parent / "work" / "ton-cache" / "img"
     results = []
     for i, v in enumerate(videos, 1):
         name = f"{i:02d}_{_slug(v['title'])}.mp4"
@@ -663,6 +673,7 @@ def generate(videos, topic, out_root, voice="antonin", log=print, progress=None,
     (out_dir / "clips.json").write_text(
         json.dumps({"video": f"To nebo to: {topic or videos[0]['title']}", "id": folder_id, "clips": results},
                    ensure_ascii=False, indent=2), encoding="utf-8")
+    shutil.rmtree(cache_dir.parent, ignore_errors=True)  # stažená loga, fotky a emoji už nejsou potřeba
     if progress:
         progress(100, "Hotovo")
     log(f"Hotovo, videa jsou v: {out_dir}")

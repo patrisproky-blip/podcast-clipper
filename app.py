@@ -149,6 +149,24 @@ def add_job(url, title=None, source="ručně", start=True):
     return job
 
 
+def _clean_work():
+    """Smaže nedokončená a zbytečná stahování. Ponechá jen to, co potřebují čekající úlohy, a perf.json."""
+    if build_cfg().get("keep_source"):
+        return
+    work = DATA / "work"
+    if not work.is_dir():
+        return
+    keep = {j.get("vid") or (j.get("info") or {}).get("id") for j in jobs.values()
+            if j.get("status") in ("waiting", "queued", "running")}
+    for p in work.iterdir():
+        if p.name == "perf.json" or (p.name.split(".")[0] in keep):
+            continue
+        try:
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+        except OSError:
+            pass
+
+
 def worker():
     while True:
         jid = job_queue.get()
@@ -856,6 +874,7 @@ def main():
         sys.exit(1)
 
     _load_jobs()
+    _clean_work()
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=watcher_loop, daemon=True).start()
 

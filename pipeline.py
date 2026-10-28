@@ -98,6 +98,7 @@ def render_clips(info, transcript, clips, cfg, log=print, progress=None):
 
     if not cfg["keep_source"]:
         Path(info["path"]).unlink(missing_ok=True)
+        transcript_path(cfg, vid).unlink(missing_ok=True)
 
     log(f"Hotovo, klipy jsou v: {out_dir}")
     prog(100, "Hotovo")
