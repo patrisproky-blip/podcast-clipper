@@ -11,6 +11,7 @@ DEFAULTS = {
     "whisper_compute_type": "int8",
     "selection_mode": "manual",    # "manual" = ručně přes chat Claude (zdarma), "api" = automaticky přes API
     "clip_style": "general",       # "general", "thisorthat" (hra To nebo to) nebo "stream"
+    "photo_source": "web",         # fotky ve videích To nebo to: "web" (vyhledávání obrázků), "pixabay" (klíč) nebo "none"
     "layout_mode": "auto",         # "auto" = podcast, "stream" = hra nahoře a kamera dole
     "stream_cam_corner": "br",
     "stream_cam_size": 26,

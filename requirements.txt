@@ -8,4 +8,5 @@ pillow
 pyyaml
 flask
 edge-tts
+ddgs
 certifi

@@ -1,5 +1,6 @@
 """Videa „To nebo to“ vyrobená od nuly: otázky -> obrazovky s obrázky -> hlas, odpočet, procenta."""
 import asyncio
+import io
 import json
 import random
 import re
@@ -280,31 +281,79 @@ def _logo_card(domain, cache_dir, failed):
     return card
 
 
-def _photo_card(query, cache_dir, key, failed):
-    """Fotka z Pexels (bezplatná licence) oříznutá na zaoblený obdélník. Potřebuje bezplatný klíč Pexels."""
-    query = (query or "").strip().lower()
-    if not key or not query or not cache_dir:
+def _ssl_ctx():
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        return ssl.create_default_context()
+
+
+def _http_get(url, ctx, headers=None, timeout=15, limit=8_000_000):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        data = r.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("soubor je příliš velký")
+    return data
+
+
+def _usable_image(data):
+    """Ověří, že data jsou obrázek dostatečné velikosti."""
+    im = Image.open(io.BytesIO(data))
+    im.load()
+    if im.width < 400 or im.height < 250:
+        raise ValueError("obrázek je příliš malý")
+    return data
+
+
+def _web_image(query, ctx):
+    """Obrázek z internetového vyhledávání (bez klíče). Zkouší několik výsledků, dokud jeden nejde stáhnout."""
+    from ddgs import DDGS
+
+    for r in DDGS().images(query, safesearch="moderate", max_results=8) or []:
+        url = r.get("image")
+        if not url or not url.lower().startswith("http"):
+            continue
+        try:
+            return _usable_image(_http_get(url, ctx, timeout=12))
+        except Exception:  # noqa: BLE001
+            continue
+    raise LookupError("žádný použitelný obrázek")
+
+
+def _pixabay_image(query, key, ctx):
+    url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
+        "key": key, "q": query, "image_type": "photo", "orientation": "horizontal",
+        "per_page": 5, "safesearch": "true", "min_width": 640})
+    hits = json.loads(_http_get(url, ctx).decode("utf-8")).get("hits") or []
+    for h in hits:
+        for field in ("largeImageURL", "webformatURL"):
+            if h.get(field):
+                try:
+                    return _usable_image(_http_get(h[field], ctx, timeout=20))
+                except Exception:  # noqa: BLE001
+                    continue
+    raise LookupError("žádná fotka")
+
+
+def _photo_card(query, cache_dir, photo, failed):
+    """Fotka (z internetového vyhledávání nebo z Pixabay) oříznutá na zaoblený obdélník."""
+    photo = photo or {}
+    source = photo.get("source", "none")
+    query = (query or "").strip()
+    if source not in ("web", "pixabay") or not query or not cache_dir:
         return None
-    slug = re.sub(r"[^a-z0-9]+", "-", query).strip("-")[:60]
-    path = Path(cache_dir) / "photos" / f"{slug}.jpg"
+    if source == "pixabay" and not photo.get("pixabay_key"):
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-")[:60] or "foto"
+    path = Path(cache_dir) / "photos" / f"{source}-{slug}.jpg"
     if not path.exists():
         if "photo:" + slug in failed:
             return None
         try:
-            try:
-                import certifi
-                ctx = ssl.create_default_context(cafile=certifi.where())
-            except Exception:  # noqa: BLE001
-                ctx = ssl.create_default_context()
-            url = "https://api.pexels.com/v1/search?per_page=1&orientation=landscape&query=" + urllib.parse.quote(query)
-            req = urllib.request.Request(url, headers={"Authorization": key, "User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
-                photos = json.loads(r.read().decode("utf-8")).get("photos") or []
-            if not photos:
-                raise LookupError("žádná fotka")
-            with urllib.request.urlopen(urllib.request.Request(photos[0]["src"]["large"], headers={"User-Agent": "Mozilla/5.0"}),
-                                        timeout=20, context=ctx) as r:
-                data = r.read()
+            ctx = _ssl_ctx()
+            data = _web_image(query, ctx) if source == "web" else _pixabay_image(query, photo["pixabay_key"], ctx)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         except Exception:  # noqa: BLE001
@@ -325,12 +374,13 @@ def _photo_card(query, cache_dir, key, failed):
     return im
 
 
-def _pictures(rnd, cache_dir, failed, pexels_key=None):
-    """Pro každou možnost: logo značky, jinak fotka (když je klíč Pexels), jinak emoji, jinak nic."""
+def _pictures(rnd, cache_dir, failed, photo=None):
+    """Pro každou možnost: logo značky, jinak fotka (podle nastavení), jinak emoji, jinak nic."""
     out = []
     for side in ("a", "b"):
+        query = rnd.get("p" + side) or rnd.get(side)
         out.append(_logo_card(rnd.get("l" + side), cache_dir, failed)
-                   or _photo_card(rnd.get("p" + side), cache_dir, pexels_key, failed)
+                   or _photo_card(query, cache_dir, photo, failed)
                    or _emoji_image(rnd.get("e" + side), cache_dir, failed))
     return tuple(out)
 
@@ -494,7 +544,7 @@ def _mix_and_write(path, total_s, events, voices):
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, pexels_key=None):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
     rounds, title = video["rounds"], video["title"]
     results = make_results(len(rounds))
@@ -527,7 +577,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, pexels_
 
         used_phrases = []
         for i, (rnd, res) in enumerate(zip(rounds, results), 1):
-            pics = _pictures(rnd, cache_dir, failed_img, pexels_key)
+            pics = _pictures(rnd, cache_dir, failed_img, photo)
             question = f"{rnd['a']}, nebo {rnd['b']}?"
             if i == 1:
                 question = "To nebo to? " + question
@@ -582,7 +632,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, pexels_
         if res.returncode != 0:
             raise RuntimeError(f"ffmpeg selhal: {res.stderr.strip()[-300:]}")
     if failed_img:
-        log(f"Upozornění: {len(failed_img)} obrázků se nepodařilo stáhnout (internet nebo klíč Pexels), použilo se náhradní řešení.")
+        log(f"Upozornění: {len(failed_img)} obrázků se nepodařilo stáhnout (internet, klíč nebo nenalezený obrázek), použilo se náhradní řešení.")
     return t
 
 
@@ -591,7 +641,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="antonin", log=print, progress=None, pexels_key=None):
+def generate(videos, topic, out_root, voice="antonin", log=print, progress=None, photo=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -603,7 +653,7 @@ def generate(videos, topic, out_root, voice="antonin", log=print, progress=None,
         log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
         if progress:
             progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, pexels_key=pexels_key)
+        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo)
         first = v["rounds"][0]
         results.append({
             "file": name, "title": v["title"], "score": 0,

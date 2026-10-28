@@ -41,7 +41,7 @@ app = Flask(__name__)
 # ----------------------------------------------------------------- nastavení
 
 INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size", "max_transcribe_minutes")
-STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner")
+STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner", "photo_source")
 
 
 def load_settings():
@@ -81,6 +81,8 @@ def build_cfg():
         cfg["selection_mode"] = "manual"
     if cfg.get("clip_style") not in ("general", "thisorthat", "stream"):
         cfg["clip_style"] = "general"
+    if cfg.get("photo_source") not in ("web", "pixabay", "none"):
+        cfg["photo_source"] = "web"
     if cfg.get("layout_mode") not in ("auto", "stream"):
         cfg["layout_mode"] = "auto"
     if cfg.get("stream_cam_corner") not in ("br", "bl", "tr", "tl"):
@@ -176,7 +178,7 @@ def worker():
                     job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
                                               job.get("voice", "antonin"), log, progress,
-                                              pexels_key=load_settings().get("pexels_key"))
+                                              photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")})
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -294,8 +296,8 @@ def api_state():
         "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
-        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pexels_key")},
-        "has_pexels_key": bool(s.get("pexels_key")),
+        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key")},
+        "has_pixabay_key": bool(s.get("pixabay_key")),
         "defaults": build_cfg() | {"subtitles": build_cfg()["subtitles"]},
     })
 
@@ -539,12 +541,14 @@ def api_save_settings():
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
         s.pop("api_key", None)
-    if data.get("pexels_key") is not None and "pexels_key" in data:
-        key = str(data["pexels_key"]).strip()
+    if data.get("pixabay_key") is not None and "pixabay_key" in data:
+        key = str(data["pixabay_key"]).strip()
         if key:
-            s["pexels_key"] = key
-        elif data.get("clear_pexels_key"):
-            s.pop("pexels_key", None)
+            s["pixabay_key"] = key
+        elif data.get("clear_pixabay_key"):
+            s.pop("pixabay_key", None)
+    if "photo_source" in data and data["photo_source"] not in ("web", "pixabay", "none"):
+        return jsonify(error="Neznámý zdroj fotek."), 400
     if "layout_mode" in data and data["layout_mode"] not in ("auto", "stream"):
         return jsonify(error="Neznámé rozložení videa."), 400
     if "stream_cam_corner" in data and data["stream_cam_corner"] not in ("br", "bl", "tr", "tl"):
