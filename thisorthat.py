@@ -179,10 +179,10 @@ def questions_via_api(topic, rounds, videos, cfg):
 
 _BUCKETS = [(51, 57, 0.20, "close"), (58, 72, 0.38, "mid"), (73, 88, 0.30, "strong"), (89, 96, 0.12, "huge")]
 _PHRASES = {
-    "close": ["Těsně vyhrává: {w}", "Skoro remíza, ale vede: {w}", "Hlasy se dělí skoro napůl, těsně vede: {w}"],
-    "mid": ["Většina lidí volí: {w}", "Vyhrává: {w}", "Líp dopadlo: {w}"],
-    "strong": ["Jasně vede: {w}", "Tady má navrch: {w}", "Většina je pro: {w}"],
-    "huge": ["Drtivě vyhrává: {w}", "Tohle bylo jasné, vyhrává: {w}", "Skoro všichni volí: {w}"],
+    "close": ["Úplně těsné, ale těsně vyhrává {w}.", "Skoro remíza, ale o fous vede {w}.", "Hlasy se dělí skoro napůl, těsně vede {w}."],
+    "mid": ["Většina lidí si vybrala {w}.", "Tady vyhrává {w}.", "Líp to dopadlo pro {w}."],
+    "strong": ["Jasně vede {w}.", "Tady má navrch {w}.", "Většina je pro {w}."],
+    "huge": ["Tohle bylo jasné, drtivě vyhrává {w}.", "Skoro všichni si vybrali {w}.", "Naprosto jasná výhra pro {w}."],
 }
 
 
@@ -514,7 +514,7 @@ def synth(text, voice, tmp, name):
     mp3 = Path(tmp) / f"{name}.mp3"
 
     async def run():
-        await edge_tts.Communicate(text, voice, rate="+6%").save(str(mp3))
+        await edge_tts.Communicate(text, voice, rate="-3%").save(str(mp3))
 
     asyncio.run(run())
     res = subprocess.run(
@@ -651,7 +651,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="antonin", log=print, progress=None, photo=None):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id

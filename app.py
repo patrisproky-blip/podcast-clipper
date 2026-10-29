@@ -195,7 +195,7 @@ def worker():
                     job.update(stage="Claude vymýšlí otázky", pct=3)
                     job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
-                                              job.get("voice", "antonin"), log, progress,
+                                              job.get("voice", "vlasta"), log, progress,
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")})
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
@@ -493,7 +493,7 @@ def api_ton_generate():
         return jsonify(error="Napište téma."), 400
     shown = ", ".join(thisorthat.split_topics(topic))[:80]
     job = add_job("", title=f"To nebo to: {shown}", source="generátor", start=False)
-    voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "antonin"
+    voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "vlasta"
     job.update(kind="ton", topic=topic, voice=voice, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))
