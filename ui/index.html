@@ -168,7 +168,7 @@ a:hover{text-decoration:underline}
         <div class="field"><label for="ton_videos">Videí na jedno téma</label><input id="ton_videos" type="number" min="1" max="20" value="1"></div>
       </div>
       <div class="field"><label for="ton_voice">Namluvení</label>
-        <select id="ton_voice"><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="antonin">Český hlas, muž (Antonín)</option><option value="off">Bez hlasu</option></select>
+        <select id="ton_voice"><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="antonin">Český hlas, muž (Antonín)</option><option value="eleven">Realistický hlas, žena (ElevenLabs, potřebuje klíč)</option><option value="off">Bez hlasu</option></select>
         <div class="hint">Hlas, loga značek (stahují se podle domény) i obrázky se stahují z internetu, takže počítač při vytváření musí být online. Když se nepodaří, video vznikne bez nich.</div></div>
       <div id="ton_manual">
         <div class="actions" style="margin:0 0 12px"><button onclick="tonCopy()">1. Kopírovat pokyny pro Claude</button></div>
@@ -229,6 +229,11 @@ a:hover{text-decoration:underline}
         <label for="s_photo_source">Odkud brát obrázky</label>
         <select id="s_photo_source"><option value="web">Z internetu (vyhledávání obrázků, bez klíče)</option><option value="pixabay">Z Pixabay (bezplatný klíč, volná licence)</option><option value="none">Bez fotek (jen loga a emoji)</option></select>
         <div class="hint" id="photohint">U obrázků z internetu není zaručeno, že je smíte použít. Pro videa na monetizovaných kanálech je bezpečnější Pixabay.</div>
+      </div>
+      <div class="field">
+        <label for="s_eleven">Klíč ElevenLabs (volitelný, pro přirozenější hlas)</label>
+        <input id="s_eleven" type="password" placeholder="klíč z elevenlabs.io" autocomplete="off">
+        <div class="hint" id="elevenhint">Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.</div>
       </div>
       <div class="field" id="pixfield">
         <label for="s_pixabay">Klíč Pixabay</label>
@@ -501,6 +506,7 @@ function fillSettings(force){
   $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase;
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
   $("pixhint").textContent = state.has_pixabay_key ? "Klíč Pixabay je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.";
+  $("elevenhint").textContent = state.has_eleven_key ? "Klíč ElevenLabs je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.";
   $("s_photo_source").value=v("photo_source")||"web"; $("pixfield").classList.toggle("hide",$("s_photo_source").value!=="pixabay");
   settingsLoaded=true;
 }
@@ -513,8 +519,8 @@ async function saveSettings(){
     subtitles:{style:$("s_style").value,size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked}
   };
   const key=$("s_key").value.trim(); if(key) body.api_key=key;
-  const pk=$("s_pixabay").value.trim(); if(pk) body.pixabay_key=pk; body.photo_source=$("s_photo_source").value;
-  try{ await api("/api/settings","POST",body); $("s_key").value=""; $("s_pixabay").value=""; toast("Nastavení uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }
+  const ek=$("s_eleven").value.trim(); if(ek) body.eleven_key=ek; const pk=$("s_pixabay").value.trim(); if(pk) body.pixabay_key=pk; body.photo_source=$("s_photo_source").value;
+  try{ await api("/api/settings","POST",body); $("s_key").value=""; $("s_pixabay").value=""; $("s_eleven").value=""; toast("Nastavení uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }
   catch(e){ toast(e.message); }
 }
 

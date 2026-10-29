@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -51,7 +52,7 @@ MIN_READ_S, MIN_REVEAL_S, END_S = 2.5, 2.4, 3.0
 
 RED, BLUE = (250, 40, 40), (10, 50, 250)   # horní půlka červená, spodní modrá (podle vzoru)
 INK, GREEN = (16, 19, 26), (56, 224, 120)
-VOICES = {"antonin": "cs-CZ-AntoninNeural", "vlasta": "cs-CZ-VlastaNeural", "off": None}
+VOICES = {"antonin": "cs-CZ-AntoninNeural", "vlasta": "cs-CZ-VlastaNeural", "eleven": "eleven", "off": None}
 EMOJI_URL = "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/2D/png/512/emoji_u{code}.png"
 
 _fonts = {}
@@ -507,16 +508,34 @@ def _tone(buf, t0, freq, dur=0.14, vol=0.5):
     buf[a:a + n] += sig[: max(0, len(buf) - a)]
 
 
-def synth(text, voice, tmp, name):
-    """Namluví text (Microsoft Edge TTS, zdarma, potřebuje internet). Vrátí pole vzorků 44,1 kHz mono."""
-    import edge_tts
+ELEVEN_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Sarah, ženský hlas dostupný i v bezplatném účtu
 
+
+def _eleven(text, key, mp3):
+    body = json.dumps({"text": text, "model_id": "eleven_multilingual_v2", "language_code": "cs",
+                       "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3}}).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}?output_format=mp3_44100_128", data=body,
+        headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
+    try:
+        with urllib.request.urlopen(req, timeout=60, context=_ssl_ctx()) as r:
+            mp3.write_bytes(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"ElevenLabs odmítl požadavek ({e.code}). Zkontrolujte klíč a zbývající limit.") from e
+
+
+def synth(text, voice, tmp, name, eleven_key=None):
+    """Namluví text (Microsoft Edge TTS zdarma, nebo ElevenLabs s klíčem). Vrátí pole vzorků 44,1 kHz mono."""
     mp3 = Path(tmp) / f"{name}.mp3"
+    if voice == "eleven":
+        _eleven(text, eleven_key, mp3)
+    else:
+        import edge_tts
 
-    async def run():
-        await edge_tts.Communicate(text, voice, rate="-3%").save(str(mp3))
+        async def run():
+            await edge_tts.Communicate(text, voice, rate="-3%").save(str(mp3))
 
-    asyncio.run(run())
+        asyncio.run(run())
     res = subprocess.run(
         [ffmpeg_path(), "-y", "-loglevel", "error", "-i", str(mp3), "-f", "s16le", "-ac", "1", "-ar", str(SR), "-"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **hidden_subprocess_kwargs())
@@ -546,13 +565,16 @@ def _mix_and_write(path, total_s, events, voices):
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
     rounds, title = video["rounds"], video["title"]
     results = make_results(len(rounds))
     seq, events, voices = [], [], []
     failed_img = set()
     voice_name = VOICES.get(voice or "off")
+    if voice_name == "eleven" and not eleven_key:
+        log("Upozornění: chybí klíč ElevenLabs, použije se hlas Vlasta.")
+        voice_name = VOICES["vlasta"]
     voice_fails = [0]  # po sobě jdoucí selhání; hlas se vypne až po třech
     voice_ok = [bool(voice_name)]
     t = 0.0
@@ -567,7 +589,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             last = None
             for attempt in range(3):
                 try:
-                    arr = synth(text, voice_name, tmp, name)
+                    arr = synth(text, voice_name, tmp, name, eleven_key)
                     voice_fails[0] = 0
                     return arr, len(arr) / SR
                 except Exception as e:  # noqa: BLE001
@@ -651,7 +673,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -663,7 +685,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
         log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
         if progress:
             progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo)
+        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key)
         first = v["rounds"][0]
         results.append({
             "file": name, "title": v["title"], "score": 0,

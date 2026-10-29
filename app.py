@@ -196,7 +196,8 @@ def worker():
                     job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
                                               job.get("voice", "vlasta"), log, progress,
-                                              photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")})
+                                              photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
+                                              eleven_key=load_settings().get("eleven_key"))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -314,8 +315,9 @@ def api_state():
         "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
-        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key")},
+        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key")},
         "has_pixabay_key": bool(s.get("pixabay_key")),
+        "has_eleven_key": bool(s.get("eleven_key")),
         "defaults": build_cfg() | {"subtitles": build_cfg()["subtitles"]},
     })
 
@@ -565,6 +567,12 @@ def api_save_settings():
             s["pixabay_key"] = key
         elif data.get("clear_pixabay_key"):
             s.pop("pixabay_key", None)
+    if data.get("eleven_key") is not None and "eleven_key" in data:
+        key = str(data["eleven_key"]).strip()
+        if key:
+            s["eleven_key"] = key
+        elif data.get("clear_eleven_key"):
+            s.pop("eleven_key", None)
     if "photo_source" in data and data["photo_source"] not in ("web", "pixabay", "none"):
         return jsonify(error="Neznámý zdroj fotek."), 400
     if "layout_mode" in data and data["layout_mode"] not in ("auto", "stream"):
