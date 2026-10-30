@@ -135,7 +135,7 @@ a:hover{text-decoration:underline}
   <button class="tab" data-tab="ton" onclick="showTab('ton')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h12l-3-3M19 15H7l3 3"/></svg>To nebo to</button>
   <button class="tab" data-tab="channels" onclick="showTab('channels')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="17" height="12" rx="2.5"/><path d="m9 3.5 3 3.5 3-3.5"/></svg>Kanály</button>
   <button class="tab" data-tab="settings" onclick="showTab('settings')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>Nastavení</button>
-  <div class="side-foot"><span>Zavřením okna aplikace neskončí, běží dál na pozadí.</span><button class="small" onclick="quitApp()">Ukončit aplikaci</button></div>
+  <div class="side-foot"><a id="updbanner" class="hide" target="_blank" rel="noopener" style="display:block;margin-bottom:8px;color:var(--accent);font-weight:600">Je dostupná nová verze</a><span>Zavřením okna aplikace neskončí, běží dál na pozadí.</span><button class="small" onclick="quitApp()">Ukončit aplikaci</button></div>
 </aside>
 <main>
   <h1 class="hero">Z podcastu udělejte svislá videa</h1>
@@ -169,6 +169,7 @@ a:hover{text-decoration:underline}
       </div>
       <div class="field"><label for="ton_voice">Namluvení</label>
         <select id="ton_voice"><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="antonin">Český hlas, muž (Antonín)</option><option value="eleven">Realistický hlas, žena (ElevenLabs, potřebuje klíč)</option><option value="off">Bez hlasu</option></select>
+        <div class="actions" style="margin-top:8px"><button class="small" id="voice_btn" onclick="voiceSample()">Poslechnout ukázku hlasu</button></div>
         <div class="hint">Hlas, loga značek (stahují se podle domény) i obrázky se stahují z internetu, takže počítač při vytváření musí být online. Když se nepodaří, video vznikne bez nich.</div></div>
       <div id="ton_manual">
         <div class="actions" style="margin:0 0 12px"><button onclick="tonCopy()">1. Kopírovat pokyny pro Claude</button></div>
@@ -241,6 +242,10 @@ a:hover{text-decoration:underline}
         <input id="s_pixabay" type="password" placeholder="klíč z pixabay.com/api/docs" autocomplete="off">
         <div class="hint" id="pixhint">Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.</div>
       </div>
+
+      <h2 class="sec">Hlášení chyby</h2>
+      <div class="field"><div class="hint">Když se něco pokazí, stáhněte soubor s protokolem (bez hesel a klíčů) a pošlete ho do chatu.</div>
+        <div class="actions"><a href="/api/report" download><button class="small">Stáhnout hlášení chyby</button></a></div></div>
 
       <h2 class="sec">Nahrávání na YouTube</h2>
       <div class="field" id="yt_setup">
@@ -401,7 +406,7 @@ function renderQueue(){
       ${j.log.length?`<details><summary>Podrobnosti</summary><pre>${esc(j.log.join("\n"))}</pre></details>`:""}
       <div class="actions">
         ${j.status==="error"?`<button class="small" onclick="retry('${j.id}')">Zkusit znovu</button>`:""}
-        ${j.status!=="running"?`<button class="small danger" onclick="delJob('${j.id}')">Odebrat</button>`:""}
+        ${j.status!=="running"?`<button class="small danger" onclick="delJob('${j.id}')">Odebrat</button>`:`<button class="small danger" onclick="stopJob('${j.id}')">Zastavit</button>`}
       </div>
     </div>`).join("") : `<div class="empty">Zatím žádné úlohy. Vlož odkaz na video nahoře.</div>`;
 }
@@ -448,6 +453,21 @@ async function tonGenerate(){
   try{ await api("/api/ton/generate","POST",{...tonBody(), answer:$("ton_answer").value});
     $("ton_answer").value=""; toast("Vytvářím videa…"); queueSig=""; showTab("queue"); refresh(); }
   catch(e){ alert(e.message); }
+}
+async function stopJob(id){ if(!confirm("Zastavit zpracování? Rozdělaná práce se zahodí.")) return; try{ await api(`/api/jobs/${id}/stop`,"POST"); queueSig=""; refresh(); }catch(e){ alert(e.message); } }
+let voiceAudio=null;
+async function voiceSample(){
+  const b=$("voice_btn"); b.disabled=true; b.textContent="Vytvářím ukázku…";
+  try{
+    const r=await fetch("/api/ton/voice-sample",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({voice:$("ton_voice").value})});
+    if(!r.ok){ let m="Ukázka se nepodařila."; try{ m=(await r.json()).error||m; }catch(e){} throw new Error(m); }
+    if(voiceAudio) voiceAudio.pause();
+    voiceAudio=new Audio(URL.createObjectURL(await r.blob())); voiceAudio.play();
+  }catch(e){ alert(e.message); }
+  b.disabled=false; b.textContent="Poslechnout ukázku hlasu";
+}
+async function checkUpdate(){
+  try{ const u=await api("/api/update"); if(u.available){ const a=$("updbanner"); a.href=u.url||"#"; a.textContent=`Je dostupná nová verze (${u.latest})`; a.classList.remove("hide"); } }catch(e){}
 }
 async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); queueSig=""; refresh(); }
 async function delJob(id){ if(state.jobs.find(j=>j.id===id)?.status==="waiting" && !confirm("Odebrat úlohu? Stažené video a přepis se smažou.")) return; await api(`/api/jobs/${id}`,"DELETE"); delete drafts[id]; delete promptCache[id]; delete reviewCache[id]; delete reviewDraft[id]; queueSig=""; refresh(); }
@@ -584,7 +604,7 @@ $("s_photo_source").addEventListener("change",()=>$("pixfield").classList.toggle
 $("s_whisper_model").addEventListener("change",()=>$("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto"));
 $("s_layout_mode").addEventListener("change",()=>$("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"));
 $("s_selection_mode").addEventListener("change",()=>$("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"));
-refresh(); loadClips();
+refresh(); loadClips(); checkUpdate();
 </script>
 </body>
 </html>

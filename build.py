@@ -117,6 +117,7 @@ def main():
         "--add-data", f"ui{sep}ui",
         "--add-data", f"config.yaml{sep}.",
         "--add-data", f"assets{sep}assets",
+        *(["--add-data", f"version.txt{sep}."] if (ROOT / "version.txt").exists() else []),
         "--add-binary", f"{BUILD_BIN / ('ffmpeg.exe' if IS_WIN else 'ffmpeg')}{sep}bin",
         "--add-binary", f"{BUILD_BIN / ('deno.exe' if IS_WIN else 'deno')}{sep}bin",
         "--collect-data", "cv2",

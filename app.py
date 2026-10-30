@@ -11,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -180,6 +181,8 @@ def worker():
             del job["log"][:-200]
 
         def progress(pct, stage, **extra):
+            if job.get("cancel"):
+                raise Cancelled()
             job["pct"], job["stage"] = pct, stage
             for k in ("title", "vid"):
                 if k in extra:
@@ -219,6 +222,14 @@ def worker():
                     raise RuntimeError("V přepisu není žádný text. Video asi neobsahuje řeč.")
                 job.update(info=info, prompts=parts, phase="select", status="waiting", pct=55,
                            stage="Čeká na vás: výběr momentů přes Claude", title=info["title"], vid=info["id"])
+        except Cancelled:
+            if (job.get("info") or {}).get("path"):
+                Path(job["info"]["path"]).unlink(missing_ok=True)
+            job["status"] = "cancelled"
+            with jobs_lock:
+                jobs.pop(jid, None)
+                if jid in job_order:
+                    job_order.remove(jid)
         except Exception as e:  # noqa: BLE001
             job["log"].append(f"{type(e).__name__}: {e}")
             job.update(status="error", stage="Chyba", error=str(e)[:400] or type(e).__name__)
@@ -293,7 +304,111 @@ def watcher_loop():
 YT_RE = re.compile(r"^https?://([\w-]+\.)?(youtube\.com|youtu\.be)/", re.I)
 
 
-_HIDDEN_JOB_KEYS = ("log", "prompts", "pending_clips", "info", "videos", "ton_request")
+_HIDDEN_JOB_KEYS = ("cancel", "log", "prompts", "pending_clips", "info", "videos", "ton_request")
+
+
+def app_version():
+    try:
+        return int(resource("version.txt").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+class Cancelled(Exception):
+    pass
+
+
+update_cache = {"t": 0.0, "data": {}}
+
+
+@app.get("/api/update")
+def api_update():
+    """Zjistí na GitHubu, jestli je novější sestavení. Výsledek se na pár hodin zapamatuje."""
+    cur = app_version()
+    if cur is None:
+        return jsonify(available=False)
+    if time.time() - update_cache["t"] > 6 * 3600:
+        data = {}
+        try:
+            req = urllib.request.Request("https://api.github.com/repos/patrisproky-blip/podcast-clipper/releases/latest",
+                                         headers={"User-Agent": "podcast-clipper", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                rel = json.loads(r.read().decode("utf-8"))
+            m = re.fullmatch(r"build-(\d+)", rel.get("tag_name", ""))
+            if m:
+                data = {"latest": int(m.group(1)), "url": rel.get("html_url")}
+        except Exception:  # noqa: BLE001
+            data = {}
+        update_cache.update(t=time.time(), data=data)
+    d = update_cache["data"]
+    return jsonify(available=bool(d) and d["latest"] > cur, current=cur, latest=d.get("latest"), url=d.get("url"))
+
+
+@app.post("/api/jobs/<jid>/stop")
+def api_stop_job(jid):
+    job = jobs.get(jid)
+    if not job or job["status"] not in ("running", "queued"):
+        abort(404)
+    job["cancel"] = True
+    if job["status"] == "queued":
+        job["status"] = "cancelled"
+        with jobs_lock:
+            jobs.pop(jid, None)
+            if jid in job_order:
+                job_order.remove(jid)
+            _persist_jobs()
+    else:
+        job["stage"] = "Zastavuji…"
+    return jsonify(ok=True)
+
+
+@app.post("/api/ton/voice-sample")
+def api_voice_sample():
+    import io
+    import wave
+
+    import numpy as np
+    voice = (request.get_json(silent=True) or {}).get("voice")
+    name = thisorthat.VOICES.get(voice)
+    if not name:
+        return jsonify(error="Pro tento hlas není ukázka."), 400
+    key = load_settings().get("eleven_key")
+    if name == "eleven" and not key:
+        return jsonify(error="Nejdřív vyplňte klíč ElevenLabs v Nastavení."), 400
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            arr = thisorthat.synth("To nebo to? Pizza, nebo burger? Tady vyhrává pizza.", name, tmp, "ukazka", key)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(error=f"Ukázku se nepodařilo vytvořit ({type(e).__name__}). Hlas potřebuje internet."), 502
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(thisorthat.SR)
+        w.writeframes((np.clip(arr, -1, 1) * 32000).astype("<i2").tobytes())
+    return app.response_class(buf.getvalue(), mimetype="audio/wav")
+
+
+@app.get("/api/report")
+def api_report():
+    """Zip pro hlášení chyb: protokoly, průběh úloh a nastavení bez klíčů."""
+    import io
+    import zipfile
+    secret = ("api_key", "pixabay_key", "eleven_key", "yt_client", "yt_token")
+    info = {"verze": app_version(), "systém": platform.platform(), "python": sys.version.split()[0],
+            "nastavení": {k: v for k, v in load_settings().items() if k not in secret}}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("info.json", json.dumps(info, ensure_ascii=False, indent=2))
+        for name in ("app.log", "selftest.log"):
+            p = DATA / name
+            if p.exists():
+                z.writestr(name, p.read_text(encoding="utf-8", errors="replace")[-200_000:])
+        z.writestr("ulohy.json", json.dumps(
+            [{k: j.get(k) for k in ("title", "kind", "status", "stage", "error", "log")} for j in jobs.values()],
+            ensure_ascii=False, indent=2))
+    return app.response_class(buf.getvalue(), mimetype="application/zip",
+                              headers={"Content-Disposition": "attachment; filename=hlaseni-chyby.zip"})
 
 
 def _public_job(j):
