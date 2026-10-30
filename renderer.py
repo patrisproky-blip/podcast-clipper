@@ -60,14 +60,29 @@ def analyze_faces(cap, fps, n_frames, step_s=0.5):
         times, faces_per = [], []
         try:
             det.setInputSize((640, sh))
+            gap = max(1, int(fps * 0.12))        # druhý snímek pro měření pohybu úst
             for i in range(0, n_frames, step):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, i)
                 ok, fr = cap.read()
                 if not ok:
                     break
-                _, found = det.detect(cv2.resize(fr, (640, sh)))
+                small = cv2.resize(fr, (640, sh))
+                _, found = det.detect(small)
+                acts = [0.0] * (0 if found is None else len(found))
+                if found is not None and len(found) >= 2:
+                    # kdo mluví: u kterého obličeje se nejvíc mění spodní polovina (ústa) mezi dvěma snímky
+                    ok2, fr2 = cap.read() if gap == 1 else (cap.set(cv2.CAP_PROP_POS_FRAMES, i + gap) and cap.read())
+                    if ok2:
+                        g1 = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                        g2 = cv2.cvtColor(cv2.resize(fr2, (640, sh)), cv2.COLOR_BGR2GRAY).astype(np.float32)
+                        for k, f in enumerate(found):
+                            x0, y0, fw, fh = [int(max(0, v)) for v in f[:4]]
+                            ya = y0 + int(fh * 0.55)
+                            if fw > 8 and fh > 8:
+                                acts[k] = float(np.abs(g1[ya:y0 + fh, x0:x0 + fw] - g2[ya:y0 + fh, x0:x0 + fw]).mean())
                 faces_per.append([] if found is None else
-                                 [((f[0] + f[2] / 2) / scale, (f[1] + f[3] / 2) / scale, f[2] / scale) for f in found])
+                                 [((f[0] + f[2] / 2) / scale, (f[1] + f[3] / 2) / scale, f[2] / scale, acts[k])
+                                  for k, f in enumerate(found)])
                 times.append(i / fps)
             DETECTOR = "YuNet"
             return times, faces_per
@@ -127,11 +142,41 @@ def _smooth(vals, default):
     return out
 
 
+def _follow_speaker(faces_per, W):
+    """Střed záběru pro každý vzorek. Když jsou v záběru dva lidé, kamera zůstává u toho, kdo mluví.
+    Přepne se až když druhý mluví výrazně víc po dobu aspoň dvou vzorků (žádné poskakování)."""
+    out, cur, streak = [], None, 0
+    for f in faces_per:
+        if not f:
+            out.append(None)
+            continue
+        biggest = max(f, key=lambda c: c[2])
+        if len(f) < 2 or all(len(c) < 4 for c in f):
+            cur, streak = biggest[0], 0
+            out.append(cur)
+            continue
+        act = lambda c: c[3] if len(c) > 3 else 0.0  # noqa: E731
+        best = max(f, key=act)
+        here = min(f, key=lambda c: abs(c[0] - cur)) if cur is not None else None
+        if here is None or abs(here[0] - cur) > 0.2 * W:
+            cur, streak = (best if act(best) > 0 else biggest)[0], 0
+        elif best is not here and act(best) > 1.6 * act(here) + 0.5:
+            streak += 1
+            if streak >= 2:
+                cur, streak = best[0], 0
+            else:
+                cur = here[0]
+        else:
+            cur, streak = here[0], 0
+        out.append(cur)
+    return out
+
+
 def build_tracks(times, faces_per, W, layout):
     """Vrátí funkci t -> (cx,) pro single, resp. (cx_left, cx_right) pro split."""
     t = np.array(times if times else [0.0])
     if layout == "single":
-        raw = [max(f, key=lambda c: c[2])[0] if f else None for f in faces_per]
+        raw = _follow_speaker(faces_per, W)
         s = _smooth(raw, W / 2)
         return lambda x: (float(np.interp(x, t[: len(s)], s)),)
     left, right = [], []
@@ -322,6 +367,8 @@ def render_clip(src, clip, words, cfg, out_path):
         else:
             times, faces_per = analyze_faces(cap, fps, n_frames)
             layout = choose_layout(faces_per, W)
+            if cfg.get("layout_mode") == "speaker":
+                layout = "single"       # jeden velký záběr, kamera přejíždí na toho, kdo mluví
             track = build_tracks(times, faces_per, W, layout)
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 

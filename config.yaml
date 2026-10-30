@@ -9,7 +9,7 @@ whisper_device: cpu          # sestavená aplikace běží na procesoru
 selection_mode: manual       # manual = ručně přes chat Claude (zdarma), api = automaticky přes API klíč
 clip_style: general          # general | thisorthat | stream
 photo_source: web            # web = obrázky z internetového vyhledávání, pixabay = fotky z Pixabay (klíč), none = jen loga a emoji
-layout_mode: auto            # auto = podcast (sleduje obličeje), stream = hra nahoře a kamera dole
+layout_mode: auto            # auto = podcast (dva lidé pod sebou), speaker = jeden záběr sledující mluvčího, stream = hra nahoře a kamera dole
 stream_cam_corner: br        # kde je kamera ve hře: br, bl, tr, tl
 stream_cam_size: 26          # šířka kamery v procentech šířky obrazu
 claude_model: claude-sonnet-5-5

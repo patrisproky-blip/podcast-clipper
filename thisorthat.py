@@ -544,8 +544,68 @@ def synth(text, voice, tmp, name, eleven_key=None):
     return np.frombuffer(res.stdout, dtype="<i2").astype(np.float64) / 32768.0
 
 
-def _mix_and_write(path, total_s, events, voices):
+def synth_music(total_s, seed=None):
+    """Vlastní veselá smyčka (akordy, basa, bicí) vytvořená výpočtem, takže nemá žádná autorská práva."""
+    rng = np.random.default_rng(seed)
+    bpm = float(rng.choice([104, 112, 120]))
+    beat = 60.0 / bpm
+    n = int(total_s * SR) + SR
+    out = np.zeros(n)
+    prog = [(57, [0, 3, 7]), (53, [0, 4, 7]), (48, [0, 4, 7]), (55, [0, 4, 7])]   # Am F C G
+    if rng.random() < 0.5:
+        prog = [(60, [0, 4, 7]), (55, [0, 4, 7]), (57, [0, 3, 7]), (53, [0, 4, 7])]   # C G Am F
+    f = lambda m: 440.0 * 2 ** ((m - 69) / 12)  # noqa: E731
+    bar = 4 * beat
+    nbars = int(total_s / bar) + 2
+    for b in range(nbars):
+        root, ivs = prog[b % 4]
+        t0 = b * bar
+        a = int(t0 * SR)
+        m = min(int(bar * SR), n - a)
+        if m <= 0:
+            break
+        tt = np.arange(m) / SR
+        env = np.minimum(1, tt / 0.04) * np.exp(-tt * 0.8)
+        pad = sum(np.sin(2 * np.pi * f(root + 12 + iv) * tt) + 0.3 * np.sin(4 * np.pi * f(root + 12 + iv) * tt) for iv in ivs)
+        out[a:a + m] += pad * env * 0.09
+        for q in range(8):                                  # basa po osminách
+            qa = a + int(q * beat / 2 * SR)
+            qm = min(int(beat / 2 * SR), n - qa)
+            if qm <= 0:
+                break
+            qt = np.arange(qm) / SR
+            note = root - 12 + (0 if q % 4 != 3 else 7)
+            out[qa:qa + qm] += np.sin(2 * np.pi * f(note) * qt) * np.exp(-qt * 7) * 0.22
+        for q in range(4):                                  # kopák na každou dobu
+            qa = a + int(q * beat * SR)
+            qm = min(int(0.18 * SR), n - qa)
+            if qm <= 0:
+                break
+            qt = np.arange(qm) / SR
+            out[qa:qa + qm] += np.sin(2 * np.pi * (50 + 90 * np.exp(-qt * 30)) * qt) * np.exp(-qt * 16) * 0.35
+        for q in range(8):                                  # hi-hat
+            qa = a + int((q + 0.5) * beat / 2 * SR)
+            qm = min(int(0.04 * SR), n - qa)
+            if qm <= 0:
+                break
+            qt = np.arange(qm) / SR
+            out[qa:qa + qm] += rng.standard_normal(qm) * np.exp(-qt * 90) * 0.05
+    fade = int(0.8 * SR)
+    out[-fade:] *= np.linspace(1, 0, fade)
+    return out
+
+
+def _mix_and_write(path, total_s, events, voices, music=None):
     buf = np.zeros(int(total_s * SR) + SR, dtype=np.float64)
+    if music is not None:
+        gain = np.ones(len(buf))
+        for t0, arr in voices:                              # hudba se pod hlasem ztiší
+            a, b = int(t0 * SR), int(t0 * SR) + len(arr)
+            gain[a:b] = 0.35
+        k = int(0.15 * SR)
+        gain = np.convolve(gain, np.ones(k) / k, mode="same")
+        m = music[: len(buf)]
+        buf[: len(m)] += m * gain[: len(m)] * 0.55
     for t0, f, d, v in events:
         _tone(buf, t0, f, d, v)
     for t0, arr in voices:
@@ -565,7 +625,7 @@ def _mix_and_write(path, total_s, events, voices):
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
     rounds, title = video["rounds"], video["title"]
     results = make_results(len(rounds))
@@ -635,7 +695,13 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             if arr is not None:
                 voices.append((t + 0.2, arr))
             reveal_s = max(MIN_REVEAL_S, dur + 0.8)
-            add(_frame(rnd, i, len(rounds), title, pics, reveal=res), reveal_s)
+            steps = 6                                       # procenta se rychle rozjedou od nuly
+            step_s = 0.06
+            for s in range(1, steps):
+                part = s / steps
+                grow = {**res, "pct_win": int(res["pct_win"] * part), "pct_lose": int(res["pct_lose"] * part)}
+                add(_frame(rnd, i, len(rounds), title, pics, reveal=grow), step_s)
+            add(_frame(rnd, i, len(rounds), title, pics, reveal=res), reveal_s - step_s * (steps - 1))
             t += reveal_s
 
         arr, dur = say("A co ty? Napiš to do komentářů.", "end")
@@ -646,7 +712,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
         t += max(END_S, dur + 0.8)
 
         audio = tmp / "audio.wav"
-        _mix_and_write(audio, t, events, voices)
+        _mix_and_write(audio, t, events, voices, synth_music(t) if music else None)
         listing = []
         for p, dur in seq:
             safe = p.as_posix().replace("'", "'\\''")
@@ -673,7 +739,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -685,7 +751,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
         log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
         if progress:
             progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key)
+        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key, music=music)
         first = v["rounds"][0]
         results.append({
             "file": name, "title": v["title"], "score": 0,

@@ -83,7 +83,7 @@ def build_cfg():
         cfg["clip_style"] = "general"
     if cfg.get("photo_source") not in ("web", "pixabay", "none"):
         cfg["photo_source"] = "web"
-    if cfg.get("layout_mode") not in ("auto", "stream"):
+    if cfg.get("layout_mode") not in ("auto", "speaker", "stream"):
         cfg["layout_mode"] = "auto"
     if cfg.get("stream_cam_corner") not in ("br", "bl", "tr", "tl"):
         cfg["stream_cam_corner"] = "br"
@@ -197,7 +197,8 @@ def worker():
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
                                               job.get("voice", "vlasta"), log, progress,
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
-                                              eleven_key=load_settings().get("eleven_key"))
+                                              eleven_key=load_settings().get("eleven_key"),
+                                              music=bool(load_settings().get("ton_music", True)))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -318,6 +319,7 @@ def api_state():
         "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key")},
         "has_pixabay_key": bool(s.get("pixabay_key")),
         "has_eleven_key": bool(s.get("eleven_key")),
+        "ton_music": bool(s.get("ton_music", True)),
         "defaults": build_cfg() | {"subtitles": build_cfg()["subtitles"]},
     })
 
@@ -575,7 +577,7 @@ def api_save_settings():
             s.pop("eleven_key", None)
     if "photo_source" in data and data["photo_source"] not in ("web", "pixabay", "none"):
         return jsonify(error="Neznámý zdroj fotek."), 400
-    if "layout_mode" in data and data["layout_mode"] not in ("auto", "stream"):
+    if "layout_mode" in data and data["layout_mode"] not in ("auto", "speaker", "stream"):
         return jsonify(error="Neznámé rozložení videa."), 400
     if "stream_cam_corner" in data and data["stream_cam_corner"] not in ("br", "bl", "tr", "tl"):
         return jsonify(error="Neznámá poloha kamery."), 400
@@ -592,6 +594,8 @@ def api_save_settings():
                 s[k] = int(data[k])
             except (TypeError, ValueError):
                 return jsonify(error=f"Hodnota {k} musí být číslo."), 400
+    if "ton_music" in data:
+        s["ton_music"] = bool(data["ton_music"])
     if "keep_source" in data:
         s["keep_source"] = bool(data["keep_source"])
     if "subtitles" in data:
