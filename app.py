@@ -593,12 +593,43 @@ def api_ton_prompt():
     return jsonify(prompt=thisorthat.build_prompt(topic, rounds, videos))
 
 
+def _photo_cfg():
+    return {"source": build_cfg()["photo_source"], "pixabay_key": load_settings().get("pixabay_key")}
+
+
+@app.post("/api/ton/parse")
+def api_ton_parse():
+    try:
+        return jsonify(videos=thisorthat.parse_questions(str((request.json or {}).get("answer") or "")))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/api/ton/preview")
+def api_ton_preview():
+    """Obrázky jednoho videa (nebo jedné otázky) pro náhled před vytvořením."""
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        vids = thisorthat.sanitize_videos([(request.json or {}).get("video") or {}])
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    out_root, photo = build_cfg()["output_dir"], _photo_cfg()
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        imgs = list(ex.map(lambda r: thisorthat.preview_pictures(r, out_root, photo), vids[0]["rounds"]))
+    return jsonify(video=vids[0], images=imgs)
+
+
 @app.post("/api/ton/generate")
 def api_ton_generate():
     data = request.json or {}
     topic, rounds, videos = _ton_params(data)
     answer = str(data.get("answer") or "").strip()
-    if answer:
+    if data.get("videos"):
+        try:
+            vids = thisorthat.sanitize_videos(data["videos"])
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+    elif answer:
         try:
             vids = thisorthat.parse_questions(answer)
         except ValueError as e:
@@ -725,6 +756,9 @@ def api_save_settings():
         for k in ("size", "words_per_line"):
             if k in d:
                 sub[k] = int(d[k])
+        for bk in ("emphasis", "hook_overlay"):
+            if bk in d:
+                sub[bk] = bool(d[bk])
         if "uppercase" in d:
             sub["uppercase"] = bool(d["uppercase"])
         if "style" in d:

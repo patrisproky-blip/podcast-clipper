@@ -119,6 +119,21 @@ def _emoji(text):
     return re.sub(r"\s+", "", str(text or ""))[:16]
 
 
+def _picks(r):
+    """Volby z náhledu: pořadí obrázku (ka, kb) a „bez obrázku“ (xa, xb)."""
+    out = {}
+    for s in ("a", "b"):
+        try:
+            k = int(r.get("k" + s) or 0)
+        except (TypeError, ValueError):
+            k = 0
+        if 0 < k <= 6:
+            out["k" + s] = k
+        if r.get("x" + s) is True:
+            out["x" + s] = True
+    return out
+
+
 def parse_questions(text):
     """Vytáhne videa z odpovědi chatu. Při problému vyvolá ValueError se srozumitelnou zprávou."""
     text = (text or "").strip()
@@ -156,7 +171,8 @@ def parse_questions(text):
                 if a and b:
                     rounds.append({"a": a, "b": b, "ea": _emoji(r.get("ea")), "eb": _emoji(r.get("eb")),
                                    "la": _domain(r.get("la")), "lb": _domain(r.get("lb")),
-                                   "pa": _clean(r.get("pa"), 40), "pb": _clean(r.get("pb"), 40)})
+                                   "pa": _clean(r.get("pa"), 40), "pb": _clean(r.get("pb"), 40),
+                                   **_picks(r)})
         if rounds:
             videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "rounds": rounds[:MAX_ROUNDS]})
     if not videos:
@@ -310,26 +326,34 @@ def _usable_image(data):
     return data
 
 
-def _web_image(query, ctx):
-    """Obrázek z internetového vyhledávání (bez klíče). Zkouší několik výsledků, dokud jeden nejde stáhnout."""
+def _web_image(query, ctx, skip=0):
+    """Obrázek z internetového vyhledávání (bez klíče). Přeskočí `skip` použitelných výsledků (volba „jiný obrázek“)."""
     from ddgs import DDGS
 
-    for r in DDGS().images(query, safesearch="moderate", max_results=8) or []:
+    last = None
+    for r in DDGS().images(query, safesearch="moderate", max_results=8 + 4 * skip) or []:
         url = r.get("image")
         if not url or not url.lower().startswith("http"):
             continue
         try:
-            return _usable_image(_http_get(url, ctx, timeout=12))
+            last = _usable_image(_http_get(url, ctx, timeout=12))
         except Exception:  # noqa: BLE001
             continue
+        if skip <= 0:
+            return last
+        skip -= 1
+    if last is not None:
+        return last           # méně výsledků než požadované pořadí: vezme se poslední použitelný
     raise LookupError("žádný použitelný obrázek")
 
 
-def _pixabay_image(query, key, ctx):
+def _pixabay_image(query, key, ctx, skip=0):
     url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
         "key": key, "q": query, "image_type": "photo", "orientation": "horizontal",
         "per_page": 5, "safesearch": "true", "min_width": 640})
     hits = json.loads(_http_get(url, ctx).decode("utf-8")).get("hits") or []
+    if hits and skip:
+        hits = hits[skip % len(hits):] + hits[:skip % len(hits)]
     for h in hits:
         for field in ("largeImageURL", "webformatURL"):
             if h.get(field):
@@ -340,7 +364,7 @@ def _pixabay_image(query, key, ctx):
     raise LookupError("žádná fotka")
 
 
-def _photo_card(query, cache_dir, photo, failed):
+def _photo_card(query, cache_dir, photo, failed, pick=0):
     """Fotka (z internetového vyhledávání nebo z Pixabay) oříznutá na zaoblený obdélník."""
     photo = photo or {}
     source = photo.get("source", "none")
@@ -350,13 +374,15 @@ def _photo_card(query, cache_dir, photo, failed):
     if source == "pixabay" and not photo.get("pixabay_key"):
         return None
     slug = re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-")[:60] or "foto"
+    slug = f"{slug}-{pick}" if pick else slug
     path = Path(cache_dir) / "photos" / f"{source}-{slug}.jpg"
     if not path.exists():
         if "photo:" + slug in failed:
             return None
         try:
             ctx = _ssl_ctx()
-            data = _web_image(query, ctx) if source == "web" else _pixabay_image(query, photo["pixabay_key"], ctx)
+            data = (_web_image(query, ctx, pick) if source == "web"
+                    else _pixabay_image(query, photo["pixabay_key"], ctx, pick))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         except Exception:  # noqa: BLE001
@@ -382,10 +408,42 @@ def _pictures(rnd, cache_dir, failed, photo=None):
     out = []
     for side in ("a", "b"):
         query = rnd.get("p" + side) or rnd.get(side)
-        out.append(_logo_card(rnd.get("l" + side), cache_dir, failed)
-                   or _photo_card(query, cache_dir, photo, failed)
-                   or _emoji_image(rnd.get("e" + side), cache_dir, failed))
+        if rnd.get("x" + side):                      # uživatel zvolil „bez obrázku“
+            out.append(None)
+            continue
+        pick = int(rnd.get("k" + side) or 0)
+        logo = lambda: _logo_card(rnd.get("l" + side), cache_dir, failed)  # noqa: E731
+        shot = lambda: _photo_card(query, cache_dir, photo, failed, pick)  # noqa: E731
+        emoji = lambda: _emoji_image(rnd.get("e" + side), cache_dir, failed)  # noqa: E731
+        order = (shot, logo, emoji) if pick else (logo, shot, emoji)    # „jiný obrázek“ upřednostní fotku před logem
+        out.append(next((p for p in (f() for f in order) if p is not None), None))
     return tuple(out)
+
+
+def cache_dir_for(out_root):
+    return Path(out_root).parent / "work" / "ton-cache" / "img"
+
+
+def sanitize_videos(videos):
+    """Znovu projde videa poslaná z rozhraní stejným čištěním jako odpověď z chatu."""
+    return parse_questions(json.dumps({"videos": videos}, ensure_ascii=False))
+
+
+def preview_pictures(rnd, out_root, photo):
+    """Obrázky obou možností pro náhled jako malé PNG v base64 (None, když žádný není)."""
+    import base64
+    imgs = _pictures(rnd, cache_dir_for(out_root), set(), photo)
+    out = []
+    for im in imgs:
+        if im is None:
+            out.append(None)
+            continue
+        im = im.copy()
+        im.thumbnail((300, 190))
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        out.append("data:image/png;base64," + base64.b64encode(buf.getvalue()).decode())
+    return out
 
 
 # ------------------------------------------------------------------ vykreslení
@@ -744,7 +802,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir = Path(out_root).parent / "work" / "ton-cache" / "img"
+    cache_dir = cache_dir_for(out_root)
     results = []
     for i, v in enumerate(videos, 1):
         name = f"{i:02d}_{_slug(v['title'])}.mp4"

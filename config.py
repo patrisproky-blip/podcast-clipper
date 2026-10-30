@@ -32,6 +32,9 @@ DEFAULTS = {
         "words_per_line": 3,
         "style": "karaoke",           # karaoke | box | plain | word
         "highlight_color": "FFD400",  # RGB hex aktuálně vyslovovaného slova
+        "emphasis": True,             # klíčové slovo (číslo, dlouhé slovo) v každé skupině titulků dostane vlastní barvu
+        "emphasis_color": "5CE1FF",
+        "hook_overlay": True,         # prvních pár vteřin klipu ukáže úvodní větu nahoře
     },
 }
 

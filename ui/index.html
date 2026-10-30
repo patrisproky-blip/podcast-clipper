@@ -160,7 +160,7 @@ a:hover{text-decoration:underline}
   <section id="tab-ton" class="hide">
     <div class="card">
       <h2 class="sec">Videa „To nebo to“ od nuly</h2>
-      <div class="hint" style="margin:-4px 0 14px">Aplikace vyrobí svislá videa: nahoře modrá, dole červená možnost s obrázkem, namluvená otázka, odpočet 3, 2, 1 a procenta (vítěz zezelená). Procenta jsou jen pro zábavu, nejsou skutečné hlasování.</div>
+      <div class="hint" style="margin:-4px 0 14px">Aplikace vyrobí svislá videa: nahoře červená, dole modrá možnost s obrázkem, namluvená otázka, odpočet 3, 2, 1 a procenta (vítěz zezelená). Procenta jsou jen pro zábavu, nejsou skutečné hlasování.</div>
       <div class="field"><label for="ton_topic">Téma (pro hromadnou výrobu jedno téma na řádek)</label>
         <textarea id="ton_topic" rows="2" placeholder="například jídlo&#10;filmy&#10;škola" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--panel);color:var(--text);font:inherit;resize:vertical"></textarea></div>
       <div class="row">
@@ -174,7 +174,9 @@ a:hover{text-decoration:underline}
       <div id="ton_manual">
         <div class="actions" style="margin:0 0 12px"><button onclick="tonCopy()">1. Kopírovat pokyny pro Claude</button></div>
         <div class="hint" style="margin:0 0 8px">Vložte pokyny do chatu na <a href="https://claude.ai/new" target="_blank" rel="noopener">claude.ai</a> a odpověď (blok s kódem) vložte sem:</div>
-        <div class="part"><textarea id="ton_answer" placeholder="Sem vložte odpověď od Claude…"></textarea></div>
+        <div class="part"><textarea id="ton_answer" placeholder="Sem vložte odpověď od Claude…" oninput="tonReset()"></textarea></div>
+        <div class="actions" style="margin:0 0 12px"><button onclick="tonPreview()">2. Zobrazit náhled a vyměnit obrázky (nepovinné)</button></div>
+        <div id="ton_preview"></div>
       </div>
       <div class="hint hide" id="ton_apihint">Zapnutý je automatický výběr: otázky vymyslí Claude sám přes váš API klíč.</div>
       <div class="actions"><button class="primary" onclick="tonGenerate()">Vytvořit videa</button></div>
@@ -299,6 +301,8 @@ a:hover{text-decoration:underline}
           <select id="s_style"><option value="karaoke">Zvýrazněné slovo</option><option value="box">Na tmavém podkladu</option><option value="plain">Bez zvýraznění</option><option value="word">Jedno velké slovo</option></select></div>
       </div>
       <label class="chk"><input id="s_upper" type="checkbox"> Velká písmena</label>
+      <label class="chk"><input id="s_emph" type="checkbox"> Zvýraznit klíčová slova jinou barvou</label>
+      <label class="chk"><input id="s_hook" type="checkbox"> Na začátku klipu ukázat úvodní větu nahoře</label>
 
       <div class="actions" style="margin-top:22px"><button class="primary" onclick="saveSettings()">Uložit nastavení</button></div>
     </div>
@@ -450,9 +454,43 @@ async function tonCopy(){
   catch(e){ toast(e.message); }
 }
 async function tonGenerate(){
-  try{ await api("/api/ton/generate","POST",{...tonBody(), answer:$("ton_answer").value});
-    $("ton_answer").value=""; toast("Vytvářím videa…"); queueSig=""; showTab("queue"); refresh(); }
+  try{ await api("/api/ton/generate","POST",{...tonBody(), answer:$("ton_answer").value, ...(tonVids?{videos:tonVids}:{})});
+    $("ton_answer").value=""; tonReset(); toast("Vytvářím videa…"); queueSig=""; showTab("queue"); refresh(); }
   catch(e){ alert(e.message); }
+}
+let tonVids=null, tonImgs=[];
+function tonReset(){ tonVids=null; tonImgs=[]; const p=$("ton_preview"); if(p) p.innerHTML=""; }
+async function tonPreview(){
+  try{ const r=await api("/api/ton/parse","POST",{answer:$("ton_answer").value}); tonVids=r.videos; tonImgs=r.videos.map(()=>null); tonRender(); tonLoad(0); }
+  catch(e){ alert(e.message); }
+}
+async function tonLoad(vi){
+  const box=$("tonv_"+vi); if(box) box.innerHTML='<div class="hint">Stahuji obrázky…</div>';
+  try{ const r=await api("/api/ton/preview","POST",{video:tonVids[vi]}); tonVids[vi]=r.video; tonImgs[vi]=r.images; }
+  catch(e){ tonImgs[vi]=[]; alert(e.message); }
+  tonRender();
+}
+async function tonChange(vi,ri,side,mode){
+  const rnd=tonVids[vi].rounds[ri];
+  if(mode==="next"){ rnd["k"+side]=(rnd["k"+side]||0)+1; delete rnd["x"+side]; }
+  else if(mode==="none"){ rnd["x"+side]=true; delete rnd["k"+side]; }
+  else { delete rnd["x"+side]; delete rnd["k"+side]; }
+  try{ const r=await api("/api/ton/preview","POST",{video:{title:tonVids[vi].title,rounds:[rnd]}}); tonImgs[vi][ri]=r.images[0]; }
+  catch(e){ alert(e.message); }
+  tonRender();
+}
+function tonRender(){
+  const el=$("ton_preview"); if(!tonVids){ el.innerHTML=""; return; }
+  el.innerHTML=tonVids.map((v,vi)=>{
+    const imgs=tonImgs[vi];
+    const head=`<div class="grouphead"><h3>${esc(v.title)} <span class="hint">(${v.rounds.length} otázek)</span></h3>${imgs?"":`<button class="small" onclick="tonLoad(${vi})">Načíst obrázky</button>`}</div>`;
+    if(!imgs) return `<div class="part" id="tonv_${vi}">${head}</div>`;
+    const side=(rnd,ri,s)=>{ const im=imgs[ri]&&imgs[ri][s==="a"?0:1];
+      return `<div style="flex:1;min-width:0"><div style="font-weight:600;margin-bottom:6px">${esc(rnd[s])}</div>
+        <div style="height:100px;display:flex;align-items:center;justify-content:center;background:${s==="a"?"#e22":"#14c"};border-radius:10px">${im?`<img src="${im}" style="max-height:92px;max-width:100%;border-radius:8px">`:`<span style="color:#fff;font-size:12px">bez obrázku</span>`}</div>
+        <div class="actions" style="margin-top:6px"><button class="small" onclick="tonChange(${vi},${ri},'${s}','next')">Jiný obrázek</button><button class="small" onclick="tonChange(${vi},${ri},'${s}','none')">Žádný</button></div></div>`; };
+    return `<div class="part" id="tonv_${vi}">${head}${v.rounds.map((rnd,ri)=>`<div style="display:flex;gap:12px;margin-bottom:14px">${side(rnd,ri,"a")}${side(rnd,ri,"b")}</div>`).join("")}</div>`;
+  }).join("");
 }
 async function stopJob(id){ if(!confirm("Zastavit zpracování? Rozdělaná práce se zahodí.")) return; try{ await api(`/api/jobs/${id}/stop`,"POST"); queueSig=""; refresh(); }catch(e){ alert(e.message); } }
 let voiceAudio=null;
@@ -563,7 +601,7 @@ function fillSettings(force){
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
   $("s_keep_source").checked=!!v("keep_source"); $("s_ton_music").checked=state.ton_music!==false;
   $("s_size").value=sub.size; $("s_color").value=sub.highlight_color;
-  $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase;
+  $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase; $("s_emph").checked=sub.emphasis!==false; $("s_hook").checked=sub.hook_overlay!==false;
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
   $("pixhint").textContent = state.has_pixabay_key ? "Klíč Pixabay je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.";
   $("elevenhint").textContent = state.has_eleven_key ? "Klíč ElevenLabs je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.";
@@ -578,7 +616,7 @@ async function saveSettings(){
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
     keep_source:$("s_keep_source").checked, ton_music:$("s_ton_music").checked,
-    subtitles:{style:$("s_style").value,size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked}
+    subtitles:{style:$("s_style").value,size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked,emphasis:$("s_emph").checked,hook_overlay:$("s_hook").checked}
   };
   const key=$("s_key").value.trim(); if(key) body.api_key=key;
   const ek=$("s_eleven").value.trim(); if(ek) body.eleven_key=ek; const pk=$("s_pixabay").value.trim(); if(pk) body.pixabay_key=pk; body.photo_source=$("s_photo_source").value;

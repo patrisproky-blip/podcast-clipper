@@ -271,13 +271,25 @@ def build_caption_states(words, clip_start, clip_end, sc):
     states = []
     for g in groups:
         texts = [clean(x["w"]) for x in g]
+        emph = _key_word(g) if sc.get("emphasis", True) and sc.get("style", "karaoke") in ("karaoke", "box") else None
         for j, w in enumerate(g):
             start = w["start"] - clip_start
             end = (g[j + 1]["start"] if j + 1 < len(g) else w["end"] + 0.15) - clip_start
             if end <= start:
                 end = start + 0.1
-            states.append((start, end, texts, j))
+            states.append((start, end, texts, j, emph))
     return states
+
+
+def _key_word(group):
+    """Index nejdůležitějšího slova skupiny: číslo, nebo nejdelší slovo (aspoň 7 písmen). Jinak žádné."""
+    best, best_score = None, 0
+    for i, w in enumerate(group):
+        core = "".join(ch for ch in w["w"] if ch.isalnum())
+        score = len(core) + (6 if any(ch.isdigit() for ch in core) else 0)
+        if (len(core) >= 7 or any(ch.isdigit() for ch in core)) and score > best_score:
+            best, best_score = i, score
+    return best
 
 
 def _hex_to_rgba(h):
@@ -297,7 +309,7 @@ def _font(size):
     return _font_cache[size]
 
 
-def render_caption(texts, active, sc):
+def render_caption(texts, active, sc, emph=None):
     """Nakreslí jeden řádek titulků. Vrátí (BGR*alfa jako uint16, 255-alfa jako uint16)."""
     style = sc.get("style", "karaoke")
     size = int(sc["size"] * (1.45 if style == "word" else 1))
@@ -319,8 +331,10 @@ def render_caption(texts, active, sc):
         draw.rounded_rectangle([0, 0, img.width - 1, img.height - 1], radius=30, fill=(0, 0, 0, 175))
     hi = (255, 255, 255, 255) if style == "plain" else _hex_to_rgba(sc["highlight_color"])
     x = pad
+    emph_col = _hex_to_rgba(sc.get("emphasis_color", "5CE1FF"))
     for k, t in enumerate(texts):
-        draw.text((x, pad), t, font=font, fill=hi if k == active else (255, 255, 255, 255),
+        draw.text((x, pad), t, font=font,
+                  fill=hi if k == active else (emph_col if k == emph else (255, 255, 255, 255)),
                   stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
         x += widths[k] + space
     arr = np.asarray(img)
@@ -329,13 +343,62 @@ def render_caption(texts, active, sc):
     return bgr * alpha, 255 - alpha
 
 
+def render_hook(text):
+    """Úvodní věta nahoře v klipu: tmavý text na žlutém štítku, zalomený do několika řádků."""
+    text = " ".join(str(text).split())
+    if len(text) > 110:
+        text = text[:107].rstrip(" ,.;:") + "…"
+    max_w = OUT_W - 200
+    size = 72
+    while True:
+        font = _font(size)
+        lines, cur = [], ""
+        for word in text.split():
+            trial = (cur + " " + word).strip()
+            if font.getlength(trial) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        if (len(lines) <= 3 and all(font.getlength(x) <= max_w for x in lines)) or size <= 40:
+            break
+        size -= 4
+    ascent, descent = font.getmetrics()
+    lh = int((ascent + descent) * 1.08)
+    pad = 36
+    w = int(max(font.getlength(x) for x in lines)) + 2 * pad
+    img = Image.new("RGBA", (w, lh * len(lines) + 2 * pad), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, img.width - 1, img.height - 1], radius=34, fill=(255, 212, 0, 255))
+    for i, ln in enumerate(lines):
+        d.text((img.width / 2, pad + i * lh), ln, font=font, fill=(15, 15, 15, 255), anchor="ma")
+    arr = np.asarray(img)
+    alpha = arr[..., 3:4].astype(np.uint16)
+    return arr[..., 2::-1].astype(np.uint16) * alpha, 255 - alpha
+
+
+def blend_hook(frame, premul, inv_alpha, fade=1.0):
+    f = max(0.0, min(1.0, fade))
+    if f < 1.0:
+        premul = (premul * f).astype(np.uint16)
+        inv_alpha = (255 - (255 - inv_alpha) * f).astype(np.uint16)
+    blend_at(frame, premul, inv_alpha, 230)
+
+
 def blend_caption(frame, premul, inv_alpha, layout):
-    h, w = premul.shape[:2]
-    x0 = (OUT_W - w) // 2
+    h = premul.shape[0]
     if layout == "stream":
         y0 = STREAM_SPLIT - h // 2
     else:
         y0 = (OUT_H // 2 - h // 2) if layout == "split" else (OUT_H - 430 - h)
+    blend_at(frame, premul, inv_alpha, y0)
+
+
+def blend_at(frame, premul, inv_alpha, y0):
+    h, w = premul.shape[:2]
+    x0 = (OUT_W - w) // 2
     xs, ys = max(0, x0), max(0, y0)
     xe, ye = min(OUT_W, x0 + w), min(OUT_H, y0 + h)
     if xe <= xs or ye <= ys:
@@ -374,6 +437,13 @@ def render_clip(src, clip, words, cfg, out_path):
 
         states = build_caption_states(words, clip["start"], clip["end"], cfg["subtitles"])
         starts = [s[0] for s in states]
+        hook_img = None
+        if cfg["subtitles"].get("hook_overlay", True) and str(clip.get("hook") or "").strip():
+            try:
+                hook_img = render_hook(clip["hook"])
+            except Exception:  # noqa: BLE001
+                hook_img = None
+        HOOK_S = 2.8
 
         cmd = [
             ffmpeg_path(), "-y", "-loglevel", "error",
@@ -402,9 +472,11 @@ def render_clip(src, clip, words, cfg, out_path):
                 k = bisect.bisect_right(starts, t) - 1
                 if k >= 0 and t < states[k][1]:
                     if k != cur_idx:
-                        cur_img = render_caption(states[k][2], states[k][3], cfg["subtitles"])
+                        cur_img = render_caption(states[k][2], states[k][3], cfg["subtitles"], states[k][4])
                         cur_idx = k
                     blend_caption(composed, cur_img[0], cur_img[1], layout)
+                if hook_img is not None and t < HOOK_S:
+                    blend_hook(composed, hook_img[0], hook_img[1], min(1.0, (HOOK_S - t) / 0.4, 1.0 if t >= 0.12 else t / 0.12))
                 proc.stdin.write(composed.tobytes())
                 i += 1
         except BrokenPipeError:
