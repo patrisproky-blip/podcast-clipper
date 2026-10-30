@@ -316,9 +316,10 @@ def api_state():
         "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
-        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key")},
+        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key", "yt_client", "yt_token")},
         "has_pixabay_key": bool(s.get("pixabay_key")),
         "has_eleven_key": bool(s.get("eleven_key")),
+        "yt_client": bool(s.get("yt_client")), "yt_connected": bool(s.get("yt_token")),
         "ton_music": bool(s.get("ton_music", True)),
         "defaults": build_cfg() | {"subtitles": build_cfg()["subtitles"]},
     })
@@ -665,6 +666,106 @@ def api_open_folder():
     except OSError:
         return jsonify(error="Složku se nepodařilo otevřít.", path=str(folder)), 500
     return jsonify(ok=True, path=str(folder))
+
+
+# ----------------------------------------------------------------- YouTube
+
+yt_state = {}     # jednorázový kód proti podvrženému přihlášení
+yt_uploads = {}   # "vid/soubor" -> {"status", "pct", "url", "error"}
+
+
+def _yt_redirect():
+    return f"http://127.0.0.1:{request.host.rsplit(':', 1)[-1]}/api/yt/callback"
+
+
+@app.post("/api/yt/client")
+def api_yt_client():
+    import youtube
+    try:
+        cid, sec = youtube.parse_client(str((request.get_json(silent=True) or {}).get("json", "")))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    s = load_settings()
+    s["yt_client"] = [cid, sec]
+    s.pop("yt_token", None)
+    save_settings(s)
+    return jsonify(ok=True)
+
+
+@app.post("/api/yt/connect")
+def api_yt_connect():
+    import youtube
+    s = load_settings()
+    if not s.get("yt_client"):
+        return jsonify(error="Nejdřív vložte soubor z Google Cloud."), 400
+    yt_state["value"] = uuid.uuid4().hex
+    return jsonify(url=youtube.auth_url(s["yt_client"][0], _yt_redirect(), yt_state["value"]))
+
+
+@app.get("/api/yt/callback")
+def api_yt_callback():
+    import youtube
+    s = load_settings()
+    code = request.args.get("code")
+    if not code or not s.get("yt_client") or not yt_state.get("value") or request.args.get("state") != yt_state.pop("value", None):
+        return "Přihlášení se nepovedlo nebo bylo zrušeno. Zavřete tuto kartu a zkuste to v aplikaci znovu.", 400
+    try:
+        s["yt_token"] = youtube.exchange_code(s["yt_client"], code, _yt_redirect())
+    except Exception as e:  # noqa: BLE001
+        return f"Přihlášení se nepovedlo: {e}", 400
+    save_settings(s)
+    return ("<meta charset=utf-8><body style='font:18px system-ui;padding:40px'>"
+            "Hotovo, YouTube je propojený. Tuto kartu můžete zavřít a vrátit se do aplikace.</body>")
+
+
+@app.post("/api/yt/disconnect")
+def api_yt_disconnect():
+    s = load_settings()
+    s.pop("yt_token", None)
+    s.pop("yt_client", None)
+    save_settings(s)
+    return jsonify(ok=True)
+
+
+@app.post("/api/yt/upload")
+def api_yt_upload():
+    import youtube
+    data = request.get_json(silent=True) or {}
+    vid, fname = str(data.get("vid", "")), str(data.get("file", ""))
+    privacy = data.get("privacy") if data.get("privacy") in ("private", "unlisted", "public") else "private"
+    s = load_settings()
+    if not s.get("yt_token"):
+        return jsonify(error="YouTube není propojený. Propojte ho v Nastavení."), 400
+    folder = Path(build_cfg()["output_dir"]).resolve() / vid
+    path = (folder / fname).resolve()
+    if not re.fullmatch(r"[\w-]+", vid) or folder not in path.parents or not path.is_file():
+        abort(404)
+    meta = json.loads((folder / "clips.json").read_text(encoding="utf-8"))
+    clip = next((c for c in meta.get("clips", []) if c.get("file") == fname), {})
+    title = (clip.get("title") or fname).strip()
+    if "#shorts" not in title.lower():
+        title = title[:90].rstrip() + " #shorts"
+    desc = "\n".join(x for x in (clip.get("hook"), f"Zdroj: {clip['source_link']}" if clip.get("source_link") else "", "#shorts") if x)
+    key = f"{vid}/{fname}"
+    if yt_uploads.get(key, {}).get("status") == "running":
+        return jsonify(ok=True)
+    yt_uploads[key] = {"status": "running", "pct": 0}
+
+    def run():
+        try:
+            url = youtube.upload(path, title, desc, privacy, s["yt_client"], s["yt_token"], tags=["shorts"],
+                                 on_progress=lambda f: yt_uploads[key].update(pct=int(f * 100)))
+            yt_uploads[key] = {"status": "done", "pct": 100, "url": url, "privacy": privacy}
+        except Exception as e:  # noqa: BLE001
+            yt_uploads[key] = {"status": "error", "error": str(e)[:300]}
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify(ok=True)
+
+
+@app.get("/api/yt/uploads")
+def api_yt_uploads():
+    return jsonify(yt_uploads)
 
 
 @app.get("/api/ping")

@@ -242,6 +242,23 @@ a:hover{text-decoration:underline}
         <div class="hint" id="pixhint">Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.</div>
       </div>
 
+      <h2 class="sec">Nahrávání na YouTube</h2>
+      <div class="field" id="yt_setup">
+        <div class="hint" id="yt_status"></div>
+        <div id="yt_steps">
+          <div class="hint">1) Na console.cloud.google.com vytvořte projekt a zapněte „YouTube Data API v3“. 2) V části Přihlašovací údaje vytvořte „ID klienta OAuth“ typu Aplikace pro počítač a stáhněte JSON. 3) V části „Obrazovka souhlasu“ přidejte svůj e-mail mezi testovací uživatele a stav aplikace přepněte na „Publikováno“ (jinak přihlášení po 7 dnech vyprší). 4) Obsah souboru vložte sem:</div>
+          <textarea id="yt_json" rows="4" placeholder='{"installed":{"client_id":"…","client_secret":"…"}}'></textarea>
+          <div class="actions"><button class="small" onclick="ytSaveClient()">Uložit</button></div>
+        </div>
+        <div class="actions" id="yt_actions">
+          <button class="small primary" onclick="ytConnect()">Přihlásit se účtem Google</button>
+          <button class="small danger" onclick="ytDisconnect()">Odpojit</button>
+        </div>
+      </div>
+      <div class="field"><label for="s_yt_privacy">Viditelnost nahraných videí</label>
+        <select id="s_yt_privacy"><option value="private">Soukromé</option><option value="unlisted">Neveřejné</option><option value="public">Veřejné</option></select>
+        <div class="hint">Dokud Google projekt neschválí, YouTube nahraná videa stejně nastaví jako soukromá. Přepnete je pak ručně na kanálu.</div></div>
+
       <h2 class="sec">Přepis řeči</h2>
       <div class="row">
         <div class="field"><label for="s_language">Jazyk podcastu</label>
@@ -453,11 +470,33 @@ async function loadClips(){
             <div class="actions" style="margin-top:auto">
               <a href="/media/${esc(v.id)}/${encodeURIComponent(c.file)}?dl=1"><button class="small primary">Stáhnout</button></a>
               <button class="small" onclick="copyText(${esc(JSON.stringify(c.title))})">Kopírovat název</button>
+              ${state&&state.yt_connected?`<button class="small" id="yt_${esc(v.id)}_${esc(c.file)}" onclick="ytUpload('${esc(v.id)}','${esc(c.file)}')">Nahrát na YouTube</button>`:""}
             </div>
           </div>
         </div>`).join("")}</div>
     </div>`).join("");
+  ytPoll();
 }
+async function ytUpload(vid,file){
+  const priv=$("s_yt_privacy")?$("s_yt_privacy").value:"private";
+  try{ await api("/api/yt/upload","POST",{vid,file,privacy:priv}); toast("Nahrávám na YouTube…"); ytPoll(); }catch(e){ alert(e.message); }
+}
+let ytTimer=null;
+async function ytPoll(){
+  clearTimeout(ytTimer);
+  let u={}; try{ u=await api("/api/yt/uploads"); }catch(e){ return; }
+  let running=false;
+  for(const [k,x] of Object.entries(u)){
+    const b=document.getElementById("yt_"+k.replace("/","_")); if(!b) continue;
+    if(x.status==="running"){ running=true; b.textContent=`Nahrávám ${x.pct}%`; b.disabled=true; }
+    else if(x.status==="done"){ b.textContent="Nahráno ✓"; b.disabled=false; b.onclick=()=>window.open(x.url,"_blank"); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
+    else if(x.status==="error"){ b.textContent="Chyba, zkusit znovu"; b.disabled=false; b.title=x.error; if(!x.shown){ x.shown=1; alert(x.error);} }
+  }
+  if(running) ytTimer=setTimeout(ytPoll,1500);
+}
+async function ytSaveClient(){ try{ await api("/api/yt/client","POST",{json:$("yt_json").value}); $("yt_json").value=""; toast("Uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }catch(e){ alert(e.message); } }
+async function ytConnect(){ try{ const r=await api("/api/yt/connect","POST"); window.open(r.url,"_blank"); toast("Dokončete přihlášení v nové kartě"); }catch(e){ alert(e.message); } }
+async function ytDisconnect(){ if(!confirm("Odpojit YouTube?")) return; await api("/api/yt/disconnect","POST"); settingsLoaded=false; await refresh(); fillSettings(true); }
 async function delOutput(id){ if(!confirm("Smazat všechny klipy z tohoto videa?")) return; await api("/api/outputs/"+id,"DELETE"); loadClips(); }
 async function openFolder(){ try{ const r=await api("/api/open-folder","POST"); toast("Složka otevřena"); }catch(e){ toast(e.message); } }
 async function quitApp(){
@@ -508,6 +547,8 @@ function fillSettings(force){
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
   $("pixhint").textContent = state.has_pixabay_key ? "Klíč Pixabay je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.";
   $("elevenhint").textContent = state.has_eleven_key ? "Klíč ElevenLabs je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.";
+  $("yt_status").textContent = state.yt_connected ? "YouTube je propojený." : state.yt_client ? "Přístup uložen. Teď se přihlaste účtem Google." : "YouTube zatím není propojený.";
+  $("yt_steps").classList.toggle("hide",!!state.yt_client); $("yt_actions").classList.toggle("hide",!state.yt_client);
   $("s_photo_source").value=v("photo_source")||"web"; $("pixfield").classList.toggle("hide",$("s_photo_source").value!=="pixabay");
   settingsLoaded=true;
 }
