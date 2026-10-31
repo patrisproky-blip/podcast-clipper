@@ -72,13 +72,18 @@ def split_topics(topic):
     return items[:MAX_VIDEOS] or []
 
 
-def build_prompt(topic, rounds, videos):
+def build_prompt(topic, rounds, videos, english=False):
     topics = split_topics(topic) or ["všeobecné"]
     if len(topics) == 1:
         subject = f"Téma: {topics[0]}\nPočet videí: {videos}\n"
     else:
         subject = ("Témata (pro každé téma vytvoř samostatná videa):\n" + "\n".join(f"- {t}" for t in topics)
                    + f"\nPočet videí na každé téma: {videos}\n")
+    en_rule = ("- Ke každé možnosti dej i anglický překlad do polí a_en / b_en (krátký, přirozený, v základním tvaru) "
+               "a ke každému videu anglický název v poli title_en. Značky a vlastní jména nech beze změny.\n") if english else ""
+    en_ex = ', "title_en": "Food"' if english else ""
+    en_a = ', "a_en": "Pizza", "b_en": "Burger"' if english else ""
+    en_b = ', "a_en": "Netflix", "b_en": "YouTube"' if english else ""
     return (
         "Vymysli otázky do krátkých videí ve hře „To nebo to“ (anglicky „This or that“). "
         "V každé otázce si divák vybírá jednu ze dvou možností.\n\n"
@@ -94,13 +99,14 @@ def build_prompt(topic, rounds, videos):
         "- Ke každé možnosti dej do pole pa / pb anglické vyhledávací slovo pro fotku (1 až 3 slova, například pizza).\n"
         "- Ke každé možnosti bez domény přidej jeden emoji, který ji nejlépe vystihuje (bude z něj obrázek). "
         "Když žádný nesedí, dej prázdný řetězec.\n"
+        f"{en_rule}"
         "- Otázky se v rámci videí neopakují.\n"
         "- Nic urážlivého, sexuálního, politického ani o zdraví a tragédiích.\n"
         "- Každé video dostane krátký název (nejvýše 5 slov) a otázky jdou od lehčích ke zábavnějším.\n\n"
         "Odpověz POUZE jedním blokem kódu ve formátu JSON a nic dalšího nepiš. Formát:\n"
         "```json\n"
-        '{"videos": [{"title": "Jídlo", "rounds": [{"a": "Pizza", "pa": "pizza", "la": "", "ea": "🍕", "b": "Burger", "pb": "burger", "lb": "", "eb": "🍔"}, '
-        '{"a": "Netflix", "pa": "", "la": "netflix.com", "ea": "", "b": "YouTube", "pb": "", "lb": "youtube.com", "eb": ""}]}]}\n'
+        '{"videos": [{"title": "Jídlo"' + en_ex + ', "rounds": [{"a": "Pizza", "pa": "pizza", "la": "", "ea": "🍕", "b": "Burger", "pb": "burger", "lb": "", "eb": "🍔"' + en_a + '}, '
+        '{"a": "Netflix", "pa": "", "la": "netflix.com", "ea": "", "b": "YouTube", "pb": "", "lb": "youtube.com", "eb": ""' + en_b + '}]}]}\n'
         "```"
     )
 
@@ -172,22 +178,23 @@ def parse_questions(text):
                     rounds.append({"a": a, "b": b, "ea": _emoji(r.get("ea")), "eb": _emoji(r.get("eb")),
                                    "la": _domain(r.get("la")), "lb": _domain(r.get("lb")),
                                    "pa": _clean(r.get("pa"), 40), "pb": _clean(r.get("pb"), 40),
-                                   **_picks(r)})
+                                   "a_en": _clean(r.get("a_en")), "b_en": _clean(r.get("b_en")), **_picks(r)})
         if rounds:
-            videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "rounds": rounds[:MAX_ROUNDS]})
+            videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "title_en": _clean(it.get("title_en"), 50),
+                           "rounds": rounds[:MAX_ROUNDS]})
     if not videos:
         raise ValueError("V odpovědi nejsou žádné použitelné otázky (každá potřebuje „a“ a „b“).")
     return videos
 
 
-def questions_via_api(topic, rounds, videos, cfg):
+def questions_via_api(topic, rounds, videos, cfg, english=False):
     """Otázky přes Claude API (potřebuje API klíč s kreditem)."""
     import anthropic
 
     client = anthropic.Anthropic()
     resp = client.messages.create(
         model=cfg["claude_model"], max_tokens=4096,
-        messages=[{"role": "user", "content": build_prompt(topic, rounds, videos)}],
+        messages=[{"role": "user", "content": build_prompt(topic, rounds, videos, english)}],
     )
     return parse_questions("".join(b.text for b in resp.content if b.type == "text"))
 
@@ -201,6 +208,21 @@ _PHRASES = {
     "strong": ["Jasně vede {w}.", "Tady má navrch {w}.", "Většina je pro {w}."],
     "huge": ["Tohle bylo jasné, drtivě vyhrává {w}.", "Skoro všichni si vybrali {w}.", "Naprosto jasná výhra pro {w}."],
 }
+
+
+_PHRASES_EN = {
+    "close": ["It's super close, but {w} barely wins.", "Almost a tie, but {w} is slightly ahead.", "The votes are split, {w} just edges it."],
+    "mid": ["Most people picked {w}.", "{w} wins this one.", "{w} came out on top."],
+    "strong": ["{w} is clearly ahead.", "{w} takes this one.", "Most people are on the side of {w}."],
+    "huge": ["That was obvious, {w} wins by a landslide.", "Almost everyone picked {w}.", "A total win for {w}."],
+}
+LABELS = {
+    "cs": {"or": "nebo", "intro": "To nebo to? ", "q": "{a}, nebo {b}?", "end_big": "A co ty?",
+           "end_small": "Napiš to do komentářů", "end_say": "A co ty? Napiš to do komentářů."},
+    "en": {"or": "or", "intro": "This or that? ", "q": "{a}, or {b}?", "end_big": "What about you?",
+           "end_small": "Tell us in the comments", "end_say": "What about you? Tell us in the comments."},
+}
+EN_VOICES = {"cs-CZ-VlastaNeural": "en-US-AvaNeural", "cs-CZ-AntoninNeural": "en-US-AndrewNeural"}
 
 
 def make_results(n, rng=None):
@@ -525,7 +547,7 @@ def _circle(img, label, size):
     img.paste(layer, (W // 2 - layer.width // 2, MID - layer.height // 2 - 2), layer)
 
 
-def _frame(rnd, idx, total, title, pics, count=None, reveal=None):
+def _frame(rnd, idx, total, title, pics, count=None, reveal=None, lang="cs"):
     img = Image.new("RGB", (W, H), RED)
     d = ImageDraw.Draw(img)
     d.rectangle([0, MID, W, H], fill=BLUE)
@@ -537,19 +559,19 @@ def _frame(rnd, idx, total, title, pics, count=None, reveal=None):
     _half(img, True, rnd["a"], pics[0], pa, bool(reveal) and reveal["win"] == "a")
     _half(img, False, rnd["b"], pics[1], pb, bool(reveal) and reveal["win"] == "b")
     if count is None:
-        _circle(img, "nebo", 70)
+        _circle(img, LABELS[lang]["or"], 70)
     else:
         _circle(img, str(count), 120)
     return img
 
 
-def _end_frame(title):
+def _end_frame(title, lang="cs"):
     img = Image.new("RGB", (W, H), RED)
     d = ImageDraw.Draw(img)
     d.rectangle([0, MID, W, H], fill=BLUE)
     d.rectangle([0, MID - BAND, W, MID + BAND], fill=(0, 0, 0))
-    _text_block(img, "A co ty?", W // 2, MID - 330, W - 120, 400, start=230)
-    _text_block(img, "Napiš to do komentářů", W // 2, MID + 330, W - 120, 400, start=150)
+    _text_block(img, LABELS[lang]["end_big"], W // 2, MID - 330, W - 120, 400, start=230)
+    _text_block(img, LABELS[lang]["end_small"], W // 2, MID + 330, W - 120, 400, start=150)
     return img
 
 
@@ -569,8 +591,8 @@ def _tone(buf, t0, freq, dur=0.14, vol=0.5):
 ELEVEN_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Sarah, ženský hlas dostupný i v bezplatném účtu
 
 
-def _eleven(text, key, mp3, speed=1.0):
-    body = json.dumps({"text": text, "model_id": "eleven_multilingual_v2", "language_code": "cs",
+def _eleven(text, key, mp3, speed=1.0, lang="cs"):
+    body = json.dumps({"text": text, "model_id": "eleven_multilingual_v2", "language_code": lang,
                        "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3,
                                           "speed": max(0.7, min(1.2, speed))}}).encode("utf-8")
     req = urllib.request.Request(
@@ -583,13 +605,15 @@ def _eleven(text, key, mp3, speed=1.0):
         raise RuntimeError(f"ElevenLabs odmítl požadavek ({e.code}). Zkontrolujte klíč a zbývající limit.") from e
 
 
-def synth(text, voice, tmp, name, eleven_key=None, speed=100):
+def synth(text, voice, tmp, name, eleven_key=None, speed=100, lang="cs"):
     """Namluví text (Microsoft Edge TTS zdarma, nebo ElevenLabs s klíčem). Vrátí pole vzorků 44,1 kHz mono."""
     mp3 = Path(tmp) / f"{name}.mp3"
     if voice == "eleven":
-        _eleven(text, eleven_key, mp3, speed / 100)
+        _eleven(text, eleven_key, mp3, speed / 100, lang)
     else:
         import edge_tts
+        if lang == "en":
+            voice = EN_VOICES.get(voice, "en-US-AvaNeural")
 
         async def run():
             await edge_tts.Communicate(text, voice, rate=f"{int(speed) - 103:+d}%").save(str(mp3))
@@ -697,10 +721,16 @@ def _mix_and_write(path, total_s, events, voices, music=None, music_gain=0.55, v
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None):
-    """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None, lang="cs", results=None):
+    """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také.
+    lang: "cs" nebo "en" (anglická verze bere texty z polí a_en / b_en). results: stejná procenta pro obě verze."""
     rounds, title = video["rounds"], video["title"]
-    results = make_results(len(rounds))
+    if lang == "en":
+        rounds = [{**r, "a": r.get("a_en") or r["a"], "b": r.get("b_en") or r["b"]} for r in rounds]
+        title = video.get("title_en") or title
+    lab = LABELS[lang]
+    phrases = _PHRASES_EN if lang == "en" else _PHRASES
+    results = results or make_results(len(rounds))
     seq, events, voices = [], [], []
     failed_img = set()
     voice_name = VOICES.get(voice or "off")
@@ -722,7 +752,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             last = None
             for attempt in range(3):
                 try:
-                    arr = synth(text, voice_name, tmp, name, eleven_key, mix_v["voice_speed"])
+                    arr = synth(text, voice_name, tmp, name, eleven_key, mix_v["voice_speed"], lang)
                     voice_fails[0] = 0
                     return arr, len(arr) / SR
                 except Exception as e:  # noqa: BLE001
@@ -743,24 +773,24 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
         used_phrases = []
         for i, (rnd, res) in enumerate(zip(rounds, results), 1):
             pics = _pictures(rnd, cache_dir, failed_img, photo)
-            question = f"{rnd['a']}, nebo {rnd['b']}?"
+            question = lab["q"].format(a=rnd["a"], b=rnd["b"])
             if i == 1:
-                question = "To nebo to? " + question
+                question = lab["intro"] + question
             arr, dur = say(question, f"q{i}")
             events.append((t, 520, 0.18, 0.35))
             if arr is not None:
                 voices.append((t + 0.25, arr))
             read = max(MIN_READ_S, dur + 0.7)
-            add(_frame(rnd, i, len(rounds), title, pics), read)
+            add(_frame(rnd, i, len(rounds), title, pics, lang=lang), read)
             t += read
 
             for n in range(COUNT_S, 0, -1):
                 events.append((t, 784 if n > 1 else 1046, 0.16, 0.4))
-                add(_frame(rnd, i, len(rounds), title, pics, count=n), 1.0)
+                add(_frame(rnd, i, len(rounds), title, pics, count=n, lang=lang), 1.0)
                 t += 1.0
 
             winner = rnd["a"] if res["win"] == "a" else rnd["b"]
-            options = [p for p in _PHRASES[res["tone"]] if p not in used_phrases] or _PHRASES[res["tone"]]
+            options = [p for p in phrases[res["tone"]] if p not in used_phrases] or phrases[res["tone"]]
             phrase = random.choice(options)
             used_phrases.append(phrase)
             arr, dur = say(phrase.format(w=winner), f"r{i}")
@@ -773,15 +803,15 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             for s in range(1, steps):
                 part = s / steps
                 grow = {**res, "pct_win": int(res["pct_win"] * part), "pct_lose": int(res["pct_lose"] * part)}
-                add(_frame(rnd, i, len(rounds), title, pics, reveal=grow), step_s)
-            add(_frame(rnd, i, len(rounds), title, pics, reveal=res), reveal_s - step_s * (steps - 1))
+                add(_frame(rnd, i, len(rounds), title, pics, reveal=grow, lang=lang), step_s)
+            add(_frame(rnd, i, len(rounds), title, pics, reveal=res, lang=lang), reveal_s - step_s * (steps - 1))
             t += reveal_s
 
-        arr, dur = say("A co ty? Napiš to do komentářů.", "end")
+        arr, dur = say(lab["end_say"], "end")
         if arr is not None:
             voices.append((t + 0.2, arr))
         events += [(t, 784, 0.3, 0.4), (t + 0.12, 1046, 0.4, 0.4)]
-        add(_end_frame(title), max(END_S, dur + 0.8))
+        add(_end_frame(title, lang), max(END_S, dur + 0.8))
         t += max(END_S, dur + 0.8)
 
         audio = tmp / "audio.wav"
@@ -814,7 +844,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None, languages=("cs",)):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -822,17 +852,23 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
     cache_dir = cache_dir_for(out_root)
     results = []
     for i, v in enumerate(videos, 1):
-        name = f"{i:02d}_{_slug(v['title'])}.mp4"
-        log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
-        if progress:
-            progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key, music=music, mix=mix)
-        first = v["rounds"][0]
-        results.append({
-            "file": name, "title": v["title"], "score": 0,
-            "hook": f"{first['a']} nebo {first['b']}?",
-            "reason": f"{len(v['rounds'])} otázek, {int(dur)} s",
-        })
+        shared = make_results(len(v["rounds"]))     # obě jazykové verze mají stejná procenta i vítěze
+        for li, lang in enumerate(languages):
+            en = lang == "en"
+            name = f"{i:02d}_{_slug(v['title'])}{'_en' if en else ''}.mp4"
+            log(f"Vytvářím video {i}/{len(videos)}{' (anglicky)' if en else ''}: {v['title']} ({len(v['rounds'])} otázek)")
+            if progress:
+                part = ((i - 1) * len(languages) + li) / (len(videos) * len(languages))
+                progress(5 + int(90 * part), f"Vytvářím video {i} z {len(videos)}" + (" (anglicky)" if en else ""))
+            dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo,
+                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared)
+            first = v["rounds"][0]
+            a, b = (first.get("a_en") or first["a"], first.get("b_en") or first["b"]) if en else (first["a"], first["b"])
+            results.append({
+                "file": name, "title": ((v.get("title_en") or v["title"]) + " (EN)") if en else v["title"], "score": 0,
+                "hook": f"{a} or {b}?" if en else f"{a} nebo {b}?",
+                "reason": f"{len(v['rounds'])} otázek, {int(dur)} s",
+            })
     (out_dir / "clips.json").write_text(
         json.dumps({"video": f"To nebo to: {topic or videos[0]['title']}", "id": folder_id, "clips": results},
                    ensure_ascii=False, indent=2), encoding="utf-8")

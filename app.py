@@ -196,12 +196,12 @@ def worker():
                     if not has_api_key():
                         raise RuntimeError("Chybí API klíč Claude. Použijte ruční výběr (otázky z chatu) nebo klíč vyplňte v Nastavení.")
                     job.update(stage="Claude vymýšlí otázky", pct=3)
-                    job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg)
+                    job["videos"] = thisorthat.questions_via_api(req["topic"], req["rounds"], req["videos"], cfg, req.get("english", False))
                 results = thisorthat.generate(job["videos"], job.get("topic", ""), cfg["output_dir"],
                                               job.get("voice", "vlasta"), log, progress,
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
                                               eleven_key=load_settings().get("eleven_key"),
-                                              music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"))
+                                              music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"), languages=job.get("languages") or ["cs"])
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -592,7 +592,7 @@ def api_ton_prompt():
     topic, rounds, videos = _ton_params(request.json or {})
     if not topic:
         return jsonify(error="Napište téma, například „jídlo“ nebo „filmy“."), 400
-    return jsonify(prompt=thisorthat.build_prompt(topic, rounds, videos))
+    return jsonify(prompt=thisorthat.build_prompt(topic, rounds, videos, bool((request.json or {}).get("english"))))
 
 
 def _photo_cfg():
@@ -647,7 +647,11 @@ def api_ton_generate():
     shown = ", ".join(thisorthat.split_topics(topic))[:80]
     job = add_job("", title=f"To nebo to: {shown}", source="generátor", start=False)
     voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "vlasta"
-    job.update(kind="ton", topic=topic, voice=voice, mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
+    english = bool(data.get("english"))
+    if english and vids and any(not (r.get("a_en") and r.get("b_en")) for v in vids for r in v["rounds"]):
+        return jsonify(error="V odpovědi chybí anglické překlady. Znovu zkopírujte pokyny se zapnutou anglickou verzí "
+                             "a pošlete je Claudovi, nebo anglickou verzi vypněte."), 400
+    job.update(kind="ton", topic=topic, voice=voice, languages=["cs", "en"] if english else ["cs"], mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos, "english": english})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))
 

@@ -167,6 +167,7 @@ a:hover{text-decoration:underline}
         <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" type="number" min="2" max="12" value="6"></div>
         <div class="field"><label for="ton_videos">Videí na jedno téma</label><input id="ton_videos" type="number" min="1" max="20" value="1"></div>
       </div>
+      <label class="chk" style="margin-bottom:14px"><input id="ton_en" type="checkbox"> Ke každému videu vytvořit i anglickou verzi (stejné otázky a procenta, anglický hlas)</label>
       <div class="field"><label for="ton_voice">Namluvení</label>
         <select id="ton_voice"><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="antonin">Český hlas, muž (Antonín)</option><option value="eleven">Realistický hlas, žena (ElevenLabs, potřebuje klíč)</option><option value="off">Bez hlasu</option></select>
         <div class="row" style="margin-top:10px">
@@ -462,7 +463,7 @@ function mixInit(){
     show(); el.addEventListener("input",()=>{ show(); try{ localStorage.setItem("mix",JSON.stringify(mixVals())); }catch(e){} });
   }
 }
-function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals()}; }
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals(), english:$("ton_en").checked}; }
 async function tonCopy(){
   try{ const r=await api("/api/ton/prompt","POST",tonBody());
     await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
