@@ -409,7 +409,7 @@ function renderQueue(){
         <div><div class="jobtitle">${esc(j.title)}</div><div class="meta">${esc(j.source)}</div></div>
         <span class="pill ${j.status}">${PILL[j.status]||j.status}</span>
       </div>
-      ${j.status==="running"||j.status==="queued"?`<div class="bar"><i style="width:${j.pct}%"></i></div><div class="meta">${esc(j.stage)}</div>`:""}
+      ${j.status==="running"||j.status==="queued"?`<div class="bar"><i style="width:${j.pct}%"></i></div><div class="meta">${esc(j.stage)}${j.eta_s?` · zbývá asi ${j.eta_s>=90?Math.round(j.eta_s/60)+" min":j.eta_s+" s"} (odhad)`:""}</div>`:""}
       ${j.status==="waiting"?waitPanel(j):""}
       ${j.status==="done"?`<div class="meta" style="margin-top:8px">Vytvořeno klipů: ${j.clips}</div>`:""}
       ${j.error?`<div class="err">${esc(j.error)}</div>`:""}

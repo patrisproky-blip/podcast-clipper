@@ -111,8 +111,7 @@ def _persist_jobs():
         j = jobs.get(i)
         if not j:
             continue
-        resumable = j["status"] in ("queued", "running") and j.get("phase") == "render"
-        if j["status"] not in ("done", "error", "waiting") and not resumable:
+        if j["status"] not in ("done", "error", "waiting", "queued", "running"):
             continue
         d = {k: v for k, v in j.items() if k != "log"}
         d["log"] = j["log"][-30:]
@@ -122,13 +121,17 @@ def _persist_jobs():
     JOBS_FILE.write_text(json.dumps(keep[-100:], ensure_ascii=False), encoding="utf-8")
 
 
+resume_ids = []
+
+
 def _load_jobs():
     if JOBS_FILE.exists():
         try:
             for j in json.loads(JOBS_FILE.read_text(encoding="utf-8")):
                 if j.get("status") in ("queued", "running"):
-                    j.update(status="error", stage="Chyba",
-                             error="Zpracování přerušilo ukončení aplikace. Klikněte na Zkusit znovu.")
+                    # přerušená úloha se po spuštění aplikace sama zařadí znovu a naváže na rozdělanou práci
+                    j.update(status="queued", stage="Pokračuje po restartu aplikace", pct=0, cancel=False)
+                    resume_ids.append(j["id"])
                 jobs[j["id"]] = j
                 job_order.append(j["id"])
         except (json.JSONDecodeError, KeyError):
@@ -147,6 +150,8 @@ def add_job(url, title=None, source="ručně", start=True):
         job_order.append(jid)
     if start:
         job_queue.put(jid)
+        with jobs_lock:
+            _persist_jobs()
     return job
 
 
@@ -157,8 +162,12 @@ def _clean_work():
     work = DATA / "work"
     if not work.is_dir():
         return
-    keep = {j.get("vid") or (j.get("info") or {}).get("id") for j in jobs.values()
-            if j.get("status") in ("waiting", "queued", "running")}
+    keep = set()
+    for j in jobs.values():
+        if j.get("status") in ("waiting", "queued", "running"):
+            m = re.search(r"(?:v=|youtu\.be/|shorts/)([\w-]{11})", j.get("url") or "")
+            keep |= {j.get("vid"), (j.get("info") or {}).get("id"), m.group(1) if m else None}
+    keep.discard(None)
     for p in work.iterdir():
         if p.name == "perf.json" or (p.name.split(".")[0] in keep):
             continue
@@ -174,7 +183,7 @@ def worker():
         job = jobs.get(jid)
         if not job or job["status"] == "cancelled":
             continue
-        job.update(status="running", stage="Začínám", pct=1)
+        job.update(status="running", stage="Začínám", pct=1, started_at=time.time(), eta_s=None)
 
         def log(msg):
             job["log"].append(str(msg))
@@ -184,6 +193,9 @@ def worker():
             if job.get("cancel"):
                 raise Cancelled()
             job["pct"], job["stage"] = pct, stage
+            started = job.setdefault("started_at", time.time())
+            elapsed = time.time() - started
+            job["eta_s"] = int(elapsed * (100 - pct) / pct) if pct >= 8 and elapsed > 30 else None
             for k in ("title", "vid"):
                 if k in extra:
                     job[k] = extra[k]
@@ -304,7 +316,7 @@ def watcher_loop():
 YT_RE = re.compile(r"^https?://([\w-]+\.)?(youtube\.com|youtu\.be)/", re.I)
 
 
-_HIDDEN_JOB_KEYS = ("cancel", "log", "prompts", "pending_clips", "info", "videos", "ton_request")
+_HIDDEN_JOB_KEYS = ("cancel", "started_at", "log", "prompts", "pending_clips", "info", "videos", "ton_request")
 
 
 def app_version():
@@ -1143,6 +1155,8 @@ def main():
 
     _load_jobs()
     _clean_work()
+    for jid in resume_ids:
+        job_queue.put(jid)
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=watcher_loop, daemon=True).start()
 

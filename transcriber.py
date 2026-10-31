@@ -69,6 +69,7 @@ def transcribe(video_path, cfg, cache_path, progress=None, duration=None, log=pr
 
     from faster_whisper import WhisperModel
 
+    partial = cache.with_name(cache.name + ".partial")
     duration = duration or audio_duration(video_path)
     model_name, est = choose_model(cfg, duration)
     if cfg["whisper_model"] == "auto":
@@ -107,10 +108,22 @@ def transcribe(video_path, cfg, cache_path, progress=None, duration=None, log=pr
     if "hallucination_silence_threshold" in supported:
         kwargs["hallucination_silence_threshold"] = 2.0
     kwargs = {k: v for k, v in kwargs.items() if k in supported}
+    out_segments, resumed = [], False
+    if "clip_timestamps" in supported and partial.exists():
+        try:
+            p = json.loads(partial.read_text(encoding="utf-8"))
+            if p.get("model") == model_name and p.get("language_cfg") == str(lang) and p.get("segments"):
+                out_segments = p["segments"]
+                kwargs["clip_timestamps"] = [float(p["next"])]
+                resumed = True
+                log(f"Přepis navazuje od {p['next'] / 60:.0f}. minuty (z přerušené práce).")
+        except (ValueError, KeyError, OSError):
+            out_segments = []
     segments, info = model.transcribe(str(video_path), **kwargs)
 
-    out = {"language": info.language, "duration": info.duration, "model": model_name, "segments": []}
+    out = {"language": info.language, "duration": info.duration, "model": model_name, "segments": out_segments}
     last_text, repeats = None, 0
+    last_save = time.time()
     for s in segments:
         # typická chyba přepisu: stále dokola stejná věta. Víc než dvě za sebou se zahodí.
         norm = " ".join(s.text.lower().split())
@@ -133,9 +146,19 @@ def transcribe(video_path, cfg, cache_path, progress=None, duration=None, log=pr
                 "words": words,
             }
         )
-    _record_speed(cfg, model_name, info.duration or duration or 0, time.time() - started)
+        if time.time() - last_save > 45:      # průběžné uložení, aby přerušení nestálo celý přepis
+            last_save = time.time()
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                partial.write_text(json.dumps({"model": model_name, "language_cfg": str(lang), "next": round(s.end, 2),
+                                               "segments": out["segments"]}, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+    if not resumed:
+        _record_speed(cfg, model_name, info.duration or duration or 0, time.time() - started)
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    partial.unlink(missing_ok=True)
     return out
 
 
