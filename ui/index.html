@@ -169,6 +169,11 @@ a:hover{text-decoration:underline}
       </div>
       <div class="field"><label for="ton_voice">Namluvení</label>
         <select id="ton_voice"><option value="vlasta">Český hlas, žena (Vlasta)</option><option value="antonin">Český hlas, muž (Antonín)</option><option value="eleven">Realistický hlas, žena (ElevenLabs, potřebuje klíč)</option><option value="off">Bez hlasu</option></select>
+        <div class="row" style="margin-top:10px">
+          <div class="field"><label for="mix_speed">Rychlost řeči: <b id="mix_speed_v"></b></label><input id="mix_speed" type="range" min="70" max="130" step="5" value="100"></div>
+          <div class="field"><label for="mix_voice">Hlasitost hlasu: <b id="mix_voice_v"></b></label><input id="mix_voice" type="range" min="0" max="150" step="5" value="100"></div>
+          <div class="field"><label for="mix_music">Hlasitost hudby: <b id="mix_music_v"></b></label><input id="mix_music" type="range" min="0" max="100" step="5" value="55"></div>
+        </div>
         <div class="actions" style="margin-top:8px"><button class="small" id="voice_btn" onclick="voiceSample()">Poslechnout ukázku hlasu</button></div>
         <div class="hint">Hlas, loga značek (stahují se podle domény) i obrázky se stahují z internetu, takže počítač při vytváření musí být online. Když se nepodaří, video vznikne bez nich.</div></div>
       <div id="ton_manual">
@@ -447,7 +452,17 @@ async function sendAnswers(id){
   try{ const r=await api(`/api/jobs/${id}/answers`,"POST",{answers}); toast(`Vybráno ${r.clips} klipů, vytvářím…`); delete drafts[id]; queueSig=""; refresh(); }
   catch(e){ alert(e.message); }
 }
-function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value}; }
+function mixVals(){ return {voice_speed:+$("mix_speed").value, voice_vol:+$("mix_voice").value, music_vol:+$("mix_music").value}; }
+function mixInit(){
+  let saved={}; try{ saved=JSON.parse(localStorage.getItem("mix")||"{}"); }catch(e){}
+  const map={mix_speed:"voice_speed",mix_voice:"voice_vol",mix_music:"music_vol"};
+  for(const [id,k] of Object.entries(map)){
+    const el=$(id); if(saved[k]!=null) el.value=saved[k];
+    const show=()=>{ $(id+"_v").textContent=el.value+" %"; };
+    show(); el.addEventListener("input",()=>{ show(); try{ localStorage.setItem("mix",JSON.stringify(mixVals())); }catch(e){} });
+  }
+}
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals()}; }
 async function tonCopy(){
   try{ const r=await api("/api/ton/prompt","POST",tonBody());
     await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
@@ -497,7 +512,7 @@ let voiceAudio=null;
 async function voiceSample(){
   const b=$("voice_btn"); b.disabled=true; b.textContent="Vytvářím ukázku…";
   try{
-    const r=await fetch("/api/ton/voice-sample",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({voice:$("ton_voice").value})});
+    const r=await fetch("/api/ton/voice-sample",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({voice:$("ton_voice").value,mix:mixVals()})});
     if(!r.ok){ let m="Ukázka se nepodařila."; try{ m=(await r.json()).error||m; }catch(e){} throw new Error(m); }
     if(voiceAudio) voiceAudio.pause();
     voiceAudio=new Audio(URL.createObjectURL(await r.blob())); voiceAudio.play();
@@ -642,7 +657,7 @@ $("s_photo_source").addEventListener("change",()=>$("pixfield").classList.toggle
 $("s_whisper_model").addEventListener("change",()=>$("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto"));
 $("s_layout_mode").addEventListener("change",()=>$("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"));
 $("s_selection_mode").addEventListener("change",()=>$("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"));
-refresh(); loadClips(); checkUpdate();
+mixInit(); refresh(); loadClips(); checkUpdate();
 </script>
 </body>
 </html>

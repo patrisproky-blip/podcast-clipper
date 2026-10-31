@@ -201,7 +201,7 @@ def worker():
                                               job.get("voice", "vlasta"), log, progress,
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
                                               eleven_key=load_settings().get("eleven_key"),
-                                              music=bool(load_settings().get("ton_music", True)))
+                                              music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -368,7 +368,9 @@ def api_voice_sample():
     import wave
 
     import numpy as np
-    voice = (request.get_json(silent=True) or {}).get("voice")
+    body = request.get_json(silent=True) or {}
+    voice = body.get("voice")
+    mix = thisorthat.clean_mix(body.get("mix"))
     name = thisorthat.VOICES.get(voice)
     if not name:
         return jsonify(error="Pro tento hlas není ukázka."), 400
@@ -377,7 +379,7 @@ def api_voice_sample():
         return jsonify(error="Nejdřív vyplňte klíč ElevenLabs v Nastavení."), 400
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            arr = thisorthat.synth("To nebo to? Pizza, nebo burger? Tady vyhrává pizza.", name, tmp, "ukazka", key)
+            arr = thisorthat.synth("To nebo to? Pizza, nebo burger? Tady vyhrává pizza.", name, tmp, "ukazka", key, mix["voice_speed"])
     except Exception as e:  # noqa: BLE001
         return jsonify(error=f"Ukázku se nepodařilo vytvořit ({type(e).__name__}). Hlas potřebuje internet."), 502
     buf = io.BytesIO()
@@ -385,7 +387,7 @@ def api_voice_sample():
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(thisorthat.SR)
-        w.writeframes((np.clip(arr, -1, 1) * 32000).astype("<i2").tobytes())
+        w.writeframes((np.clip(arr * mix["voice_vol"] / 100, -1, 1) * 32000).astype("<i2").tobytes())
     return app.response_class(buf.getvalue(), mimetype="audio/wav")
 
 
@@ -645,7 +647,7 @@ def api_ton_generate():
     shown = ", ".join(thisorthat.split_topics(topic))[:80]
     job = add_job("", title=f"To nebo to: {shown}", source="generátor", start=False)
     voice = data.get("voice") if data.get("voice") in thisorthat.VOICES else "vlasta"
-    job.update(kind="ton", topic=topic, voice=voice, videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
+    job.update(kind="ton", topic=topic, voice=voice, mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))
 

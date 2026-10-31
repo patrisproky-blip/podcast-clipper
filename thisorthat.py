@@ -569,9 +569,10 @@ def _tone(buf, t0, freq, dur=0.14, vol=0.5):
 ELEVEN_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Sarah, ženský hlas dostupný i v bezplatném účtu
 
 
-def _eleven(text, key, mp3):
+def _eleven(text, key, mp3, speed=1.0):
     body = json.dumps({"text": text, "model_id": "eleven_multilingual_v2", "language_code": "cs",
-                       "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3}}).encode("utf-8")
+                       "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3,
+                                          "speed": max(0.7, min(1.2, speed))}}).encode("utf-8")
     req = urllib.request.Request(
         f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}?output_format=mp3_44100_128", data=body,
         headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
@@ -582,16 +583,16 @@ def _eleven(text, key, mp3):
         raise RuntimeError(f"ElevenLabs odmítl požadavek ({e.code}). Zkontrolujte klíč a zbývající limit.") from e
 
 
-def synth(text, voice, tmp, name, eleven_key=None):
+def synth(text, voice, tmp, name, eleven_key=None, speed=100):
     """Namluví text (Microsoft Edge TTS zdarma, nebo ElevenLabs s klíčem). Vrátí pole vzorků 44,1 kHz mono."""
     mp3 = Path(tmp) / f"{name}.mp3"
     if voice == "eleven":
-        _eleven(text, eleven_key, mp3)
+        _eleven(text, eleven_key, mp3, speed / 100)
     else:
         import edge_tts
 
         async def run():
-            await edge_tts.Communicate(text, voice, rate="-3%").save(str(mp3))
+            await edge_tts.Communicate(text, voice, rate=f"{int(speed) - 103:+d}%").save(str(mp3))
 
         asyncio.run(run())
     res = subprocess.run(
@@ -600,6 +601,19 @@ def synth(text, voice, tmp, name, eleven_key=None):
     if res.returncode != 0 or not res.stdout:
         raise RuntimeError("hlas se nepodařilo převést")
     return np.frombuffer(res.stdout, dtype="<i2").astype(np.float64) / 32768.0
+
+
+def clean_mix(mix):
+    """Hlasitost hudby a hlasu a rychlost řeči z rozhraní, omezené na rozumné hodnoty."""
+    mix = mix or {}
+
+    def num(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, float(mix.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+    return {"music_vol": num("music_vol", 55, 0, 100), "voice_vol": num("voice_vol", 100, 0, 150),
+            "voice_speed": num("voice_speed", 100, 70, 130)}
 
 
 def synth_music(total_s, seed=None):
@@ -653,7 +667,7 @@ def synth_music(total_s, seed=None):
     return out
 
 
-def _mix_and_write(path, total_s, events, voices, music=None):
+def _mix_and_write(path, total_s, events, voices, music=None, music_gain=0.55, voice_gain=0.95):
     buf = np.zeros(int(total_s * SR) + SR, dtype=np.float64)
     if music is not None:
         gain = np.ones(len(buf))
@@ -663,13 +677,13 @@ def _mix_and_write(path, total_s, events, voices, music=None):
         k = int(0.15 * SR)
         gain = np.convolve(gain, np.ones(k) / k, mode="same")
         m = music[: len(buf)]
-        buf[: len(m)] += m * gain[: len(m)] * 0.55
+        buf[: len(m)] += m * gain[: len(m)] * music_gain
     for t0, f, d, v in events:
         _tone(buf, t0, f, d, v)
     for t0, arr in voices:
         a = int(t0 * SR)
         seg = arr[: max(0, len(buf) - a)]
-        buf[a:a + len(seg)] += seg * 0.95
+        buf[a:a + len(seg)] += seg * voice_gain
     peak = np.abs(buf).max()
     if peak > 0.98:
         buf *= 0.98 / peak
@@ -683,7 +697,7 @@ def _mix_and_write(path, total_s, events, voices, music=None):
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také."""
     rounds, title = video["rounds"], video["title"]
     results = make_results(len(rounds))
@@ -693,6 +707,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
     if voice_name == "eleven" and not eleven_key:
         log("Upozornění: chybí klíč ElevenLabs, použije se hlas Vlasta.")
         voice_name = VOICES["vlasta"]
+    mix_v = clean_mix(mix)
     voice_fails = [0]  # po sobě jdoucí selhání; hlas se vypne až po třech
     voice_ok = [bool(voice_name)]
     t = 0.0
@@ -707,7 +722,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             last = None
             for attempt in range(3):
                 try:
-                    arr = synth(text, voice_name, tmp, name, eleven_key)
+                    arr = synth(text, voice_name, tmp, name, eleven_key, mix_v["voice_speed"])
                     voice_fails[0] = 0
                     return arr, len(arr) / SR
                 except Exception as e:  # noqa: BLE001
@@ -770,7 +785,9 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
         t += max(END_S, dur + 0.8)
 
         audio = tmp / "audio.wav"
-        _mix_and_write(audio, t, events, voices, synth_music(t) if music else None)
+        _mix_and_write(audio, t, events, voices,
+                       synth_music(t) if music and mix_v["music_vol"] > 0 else None,
+                       music_gain=mix_v["music_vol"] / 100, voice_gain=0.95 * mix_v["voice_vol"] / 100)
         listing = []
         for p, dur in seq:
             safe = p.as_posix().replace("'", "'\\''")
@@ -797,7 +814,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -809,7 +826,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
         log(f"Vytvářím video {i}/{len(videos)}: {v['title']} ({len(v['rounds'])} otázek)")
         if progress:
             progress(5 + int(90 * (i - 1) / len(videos)), f"Vytvářím video {i} z {len(videos)}")
-        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key, music=music)
+        dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo, eleven_key=eleven_key, music=music, mix=mix)
         first = v["rounds"][0]
         results.append({
             "file": name, "title": v["title"], "score": 0,
