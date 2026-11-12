@@ -567,29 +567,30 @@ def _frame(rnd, idx, total, title, pics, count=None, reveal=None, lang="cs"):
     return img
 
 
-HHL = HL // 2          # výška jedné půlky na šířku (nahoře červená, dole modrá jako u krátkých videí)
-PW_L, PH_L = 600, 380    # největší obrázek na šířku
+HWL = WL // 2          # šířka jedné půlky na šířku
+PW_L, PH_L = 780, 420    # největší obrázek na šířku
 
 
-def _half_wide(img, top, text, pic, pct, winner):
-    """Půlka dlouhého videa: vlevo obrázek, uprostřed text, vpravo procenta. Stejné schéma jako u krátkých videí."""
-    cy = (HHL - BAND) // 2 if top else HHL + BAND + (HHL - BAND) // 2
+def _half_wide(img, left, text, pic, pct, winner):
+    """Půlka dlouhého videa: obrázek nahoře, pod ním text a dole procenta."""
+    cx = HWL // 2 if left else HWL + HWL // 2
+    inner = HWL - 150
     if pic is not None:
         k = min(PW_L / pic.width, PH_L / pic.height)
         p = pic.resize((max(1, int(pic.width * k)), max(1, int(pic.height * k))), Image.LANCZOS)
-        img.paste(p, (70 + (PW_L - p.width) // 2, cy - p.height // 2), p)
-        _text_block(img, text, 1090, cy, 820, 400, start=170)
+        img.paste(p, (cx - p.width // 2, 50 + (PH_L - p.height) // 2), p)
+        _text_block(img, text, cx, 50 + PH_L + 130, inner, 220, start=150)
     else:
-        _text_block(img, text, 880, cy, 1250, 420, start=200)
+        _text_block(img, text, cx, 470, inner, 520, start=190)
     if pct is not None:
-        _text_block(img, f"{pct} %", 1680, cy, 380, 220, start=150, fill=GREEN if winner else (255, 255, 255))
+        _text_block(img, f"{pct} %", cx, 930, inner, 170, start=160, fill=GREEN if winner else (255, 255, 255))
 
 
 def _wide_base():
     img = Image.new("RGB", (WL, HL), RED)
     d = ImageDraw.Draw(img)
-    d.rectangle([0, HHL, WL, HL], fill=BLUE)
-    d.rectangle([0, HHL - BAND, WL, HHL + BAND], fill=(0, 0, 0))
+    d.rectangle([HWL, 0, WL, HL], fill=BLUE)
+    d.rectangle([HWL - BAND, 0, HWL + BAND, HL], fill=(0, 0, 0))
     return img
 
 
@@ -603,17 +604,17 @@ def _frame_wide(rnd, count=None, reveal=None, pics=(None, None), lang="cs"):
     _half_wide(img, False, rnd["b"], pics[1], pb, bool(reveal) and reveal["win"] == "b")
     d = ImageDraw.Draw(img)
     r = 84
-    d.ellipse([WL // 2 - r, HHL - r, WL // 2 + r, HHL + r], fill=(30, 30, 30))
+    d.ellipse([HWL - r, HL // 2 - r, HWL + r, HL // 2 + r], fill=(30, 30, 30))
     label, size = (LABELS[lang]["or"], 70) if count is None else (str(count), 120)
     layer = _line_layer(label, size, (255, 255, 255))
-    img.paste(layer, (WL // 2 - layer.width // 2, HHL - layer.height // 2 - 2), layer)
+    img.paste(layer, (HWL - layer.width // 2, HL // 2 - layer.height // 2 - 2), layer)
     return img
 
 
 def _end_frame_wide(lang="cs"):
     img = _wide_base()
-    _text_block(img, LABELS[lang]["end_big"], WL // 2, HHL // 2 - 10, WL - 300, HHL - 120, start=230)
-    _text_block(img, LABELS[lang]["end_small"], WL // 2, HHL + HHL // 2 + 10, WL - 300, HHL - 120, start=150)
+    _text_block(img, LABELS[lang]["end_big"], HWL // 2, HL // 2, HWL - 150, 600, start=220)
+    _text_block(img, LABELS[lang]["end_small"], HWL + HWL // 2, HL // 2, HWL - 150, 600, start=150)
     return img
 
 
