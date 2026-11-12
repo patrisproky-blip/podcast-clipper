@@ -88,6 +88,7 @@ details pre{white-space:pre-wrap;margin:6px 0 0;font:12px/1.5 ui-monospace,"SF M
 .clip{padding:0;overflow:hidden;display:flex;flex-direction:column}
 .clipview{position:relative}
 .clip video{width:100%;aspect-ratio:9/16;background:#000;display:block}
+.clip.wide video{aspect-ratio:16/9}
 .score{position:absolute;top:10px;left:10px;font:600 12px var(--body);background:rgba(0,0,0,.45);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);color:#fff;padding:3px 10px;border-radius:20px;pointer-events:none}
 .clipbody{padding:12px 14px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
 .cliptitle{font-weight:600;line-height:1.3}
@@ -164,7 +165,11 @@ a:hover{text-decoration:underline}
       <div class="field"><label for="ton_topic">Téma (pro hromadnou výrobu jedno téma na řádek)</label>
         <textarea id="ton_topic" rows="2" placeholder="například jídlo&#10;filmy&#10;škola" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--panel);color:var(--text);font:inherit;resize:vertical"></textarea></div>
       <div class="row">
-        <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" type="number" min="2" max="12" value="6"></div>
+        <div class="field"><label for="ton_format">Formát videa</label>
+          <select id="ton_format" onchange="tonFormat()"><option value="short">Krátké video (9:16, Shorts, TikTok)</option><option value="long">Dlouhé video (16:9, klasické YouTube)</option></select></div>
+        <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" oninput="tonLen()" type="number" min="2" max="12" value="6"></div>
+        <div class="field" id="think_field" style="display:none"><label for="ton_think">Čas na rozhodnutí u každé otázky (s)</label><input id="ton_think" oninput="tonLen()" type="number" min="3" max="20" value="8"></div>
+        <div class="hint" id="ton_len" style="display:none"></div>
         <div class="field"><label for="ton_videos">Videí na jedno téma</label><input id="ton_videos" type="number" min="1" max="20" value="1"></div>
       </div>
       <label class="chk" style="margin-bottom:14px"><input id="ton_en" type="checkbox"> Ke každému videu vytvořit i anglickou verzi (stejné otázky a procenta, anglický hlas)</label>
@@ -463,7 +468,7 @@ function mixInit(){
     show(); el.addEventListener("input",()=>{ show(); try{ localStorage.setItem("mix",JSON.stringify(mixVals())); }catch(e){} });
   }
 }
-function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals(), english:$("ton_en").checked}; }
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals(), english:$("ton_en").checked, format:$("ton_format").value, think_s:$("ton_think").value}; }
 async function tonCopy(){
   try{ const r=await api("/api/ton/prompt","POST",tonBody());
     await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
@@ -509,6 +514,18 @@ function tonRender(){
   }).join("");
 }
 async function stopJob(id){ if(!confirm("Zastavit zpracování? Rozdělaná práce se zahodí.")) return; try{ await api(`/api/jobs/${id}/stop`,"POST"); queueSig=""; refresh(); }catch(e){ alert(e.message); } }
+function tonFormat(){
+  const long=$("ton_format").value==="long", r=$("ton_rounds");
+  $("think_field").style.display=long?"":"none"; $("ton_len").style.display=long?"":"none";
+  r.max=long?60:12; if(long&&+r.value<=12) r.value=36; if(!long&&+r.value>12) r.value=6;
+  $("ton_videos").max=long?5:20; if(long&&+$("ton_videos").value>5) $("ton_videos").value=1;
+  tonLen();
+}
+function tonLen(){
+  if($("ton_format").value!=="long") return;
+  const per=2.5+ +$("ton_think").value+4, min=Math.round(+$("ton_rounds").value*per/60);
+  $("ton_len").textContent=`Jedno video bude trvat zhruba ${min} min. Pro 8 až 10 minut zvolte kolem 36 otázek a 8 sekund na rozhodnutí.`;
+}
 let voiceAudio=null;
 async function voiceSample(){
   const b=$("voice_btn"); b.disabled=true; b.textContent="Vytvářím ukázku…";
@@ -535,7 +552,7 @@ async function loadClips(){
       <div class="grouphead"><h3>${esc(v.video)}</h3>
         <button class="small danger" onclick="delOutput('${esc(v.id)}')">Smazat</button></div>
       <div class="grid">${v.clips.map(c=>`
-        <div class="card clip">
+        <div class="card clip${c.wide?" wide":""}">
           <div class="clipview"><video controls preload="metadata" src="/media/${esc(v.id)}/${encodeURIComponent(c.file)}#t=0.1"></video>${c.score?`<span class="score">Skóre ${esc(c.score)}</span>`:""}</div>
           <div class="clipbody">
             <div class="cliptitle">${esc(c.title)}</div>

@@ -213,7 +213,8 @@ def worker():
                                               job.get("voice", "vlasta"), log, progress,
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
                                               eleven_key=load_settings().get("eleven_key"),
-                                              music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"), languages=job.get("languages") or ["cs"])
+                                              music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"), languages=job.get("languages") or ["cs"],
+                                              fmt=job.get("fmt", "short"), think_s=job.get("think_s"))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -590,12 +591,15 @@ def api_job_render(jid):
 def _ton_params(data):
     topic = "\n".join(thisorthat.split_topics(data.get("topic")))[:600]
     n_topics = max(1, len(thisorthat.split_topics(topic)))
+    long = data.get("format") == "long"
+    max_rounds = thisorthat.MAX_ROUNDS_LONG if long else thisorthat.MAX_ROUNDS
+    max_videos = thisorthat.MAX_VIDEOS_LONG if long else thisorthat.MAX_VIDEOS
     try:
-        rounds = max(2, min(thisorthat.MAX_ROUNDS, int(data.get("rounds") or 6)))
-        videos = max(1, min(thisorthat.MAX_VIDEOS, int(data.get("videos") or 1)))
+        rounds = max(2, min(max_rounds, int(data.get("rounds") or (36 if long else 6))))
+        videos = max(1, min(max_videos, int(data.get("videos") or 1)))
     except (TypeError, ValueError):
-        rounds, videos = 6, 1
-    videos = max(1, min(videos, thisorthat.MAX_VIDEOS // n_topics))  # celkem nejvýše 20 videí
+        rounds, videos = (36 if long else 6), 1
+    videos = max(1, min(videos, max_videos // n_topics))  # celkem nejvýše 20 krátkých nebo 5 dlouhých videí
     return topic, rounds, videos
 
 
@@ -663,7 +667,9 @@ def api_ton_generate():
     if english and vids and any(not (r.get("a_en") and r.get("b_en")) for v in vids for r in v["rounds"]):
         return jsonify(error="V odpovědi chybí anglické překlady. Znovu zkopírujte pokyny se zapnutou anglickou verzí "
                              "a pošlete je Claudovi, nebo anglickou verzi vypněte."), 400
-    job.update(kind="ton", topic=topic, voice=voice, languages=["cs", "en"] if english else ["cs"], mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos, "english": english})
+    job.update(kind="ton", topic=topic, voice=voice, languages=["cs", "en"] if english else ["cs"],
+               fmt="long" if data.get("format") == "long" else "short",
+               think_s=max(3, min(20, int(data.get("think_s") or thisorthat.LONG_THINK_S))) if str(data.get("think_s") or "8").isdigit() else thisorthat.LONG_THINK_S, mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos, "english": english})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))
 

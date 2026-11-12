@@ -48,6 +48,8 @@ def _covers_czech(path):
 FONT_PATH = ANTON_FONT if ANTON_FONT.exists() and _covers_czech(ANTON_FONT) else FALLBACK_FONT
 USING_ANTON = FONT_PATH == ANTON_FONT
 FPS, COUNT_S, MAX_ROUNDS, MAX_VIDEOS = 30, 3, 12, 20
+MAX_ROUNDS_LONG, MAX_VIDEOS_LONG, LONG_THINK_S = 60, 5, 8   # dlouhá videa 16:9
+WL, HL = 1920, 1080
 MIN_READ_S, MIN_REVEAL_S, END_S = 2.5, 2.4, 3.0
 
 RED, BLUE = (250, 40, 40), (10, 50, 250)   # horní půlka červená, spodní modrá (podle vzoru)
@@ -181,7 +183,7 @@ def parse_questions(text):
                                    "a_en": _clean(r.get("a_en")), "b_en": _clean(r.get("b_en")), **_picks(r)})
         if rounds:
             videos.append({"title": _clean(it.get("title"), 50) or "To nebo to", "title_en": _clean(it.get("title_en"), 50),
-                           "rounds": rounds[:MAX_ROUNDS]})
+                           "rounds": rounds[:MAX_ROUNDS_LONG]})
     if not videos:
         raise ValueError("V odpovědi nejsou žádné použitelné otázky (každá potřebuje „a“ a „b“).")
     return videos
@@ -565,6 +567,57 @@ def _frame(rnd, idx, total, title, pics, count=None, reveal=None, lang="cs"):
     return img
 
 
+HWL = WL // 2          # šířka jedné půlky na šířku
+PW_L, PH_L = 780, 420    # největší obrázek na šířku
+
+
+def _half_wide(img, left, text, pic, pct, winner):
+    """Půlka dlouhého videa: obrázek nahoře, pod ním text a dole procenta."""
+    cx = HWL // 2 if left else HWL + HWL // 2
+    inner = HWL - 150
+    if pic is not None:
+        k = min(PW_L / pic.width, PH_L / pic.height)
+        p = pic.resize((max(1, int(pic.width * k)), max(1, int(pic.height * k))), Image.LANCZOS)
+        img.paste(p, (cx - p.width // 2, 50 + (PH_L - p.height) // 2), p)
+        _text_block(img, text, cx, 50 + PH_L + 130, inner, 220, start=150)
+    else:
+        _text_block(img, text, cx, 470, inner, 520, start=190)
+    if pct is not None:
+        _text_block(img, f"{pct} %", cx, 930, inner, 170, start=160, fill=GREEN if winner else (255, 255, 255))
+
+
+def _wide_base():
+    img = Image.new("RGB", (WL, HL), RED)
+    d = ImageDraw.Draw(img)
+    d.rectangle([HWL, 0, WL, HL], fill=BLUE)
+    d.rectangle([HWL - BAND, 0, HWL + BAND, HL], fill=(0, 0, 0))
+    return img
+
+
+def _frame_wide(rnd, count=None, reveal=None, pics=(None, None), lang="cs"):
+    img = _wide_base()
+    pa = pb = None
+    if reveal:
+        pa = reveal["pct_win"] if reveal["win"] == "a" else reveal["pct_lose"]
+        pb = reveal["pct_win"] if reveal["win"] == "b" else reveal["pct_lose"]
+    _half_wide(img, True, rnd["a"], pics[0], pa, bool(reveal) and reveal["win"] == "a")
+    _half_wide(img, False, rnd["b"], pics[1], pb, bool(reveal) and reveal["win"] == "b")
+    d = ImageDraw.Draw(img)
+    r = 84
+    d.ellipse([HWL - r, HL // 2 - r, HWL + r, HL // 2 + r], fill=(30, 30, 30))
+    label, size = (LABELS[lang]["or"], 70) if count is None else (str(count), 120)
+    layer = _line_layer(label, size, (255, 255, 255))
+    img.paste(layer, (HWL - layer.width // 2, HL // 2 - layer.height // 2 - 2), layer)
+    return img
+
+
+def _end_frame_wide(lang="cs"):
+    img = _wide_base()
+    _text_block(img, LABELS[lang]["end_big"], HWL // 2, HL // 2, HWL - 150, 600, start=220)
+    _text_block(img, LABELS[lang]["end_small"], HWL + HWL // 2, HL // 2, HWL - 150, 600, start=150)
+    return img
+
+
 def _end_frame(title, lang="cs"):
     img = Image.new("RGB", (W, H), RED)
     d = ImageDraw.Draw(img)
@@ -646,7 +699,7 @@ def synth_music(total_s, seed=None):
     bpm = float(rng.choice([104, 112, 120]))
     beat = 60.0 / bpm
     n = int(total_s * SR) + SR
-    out = np.zeros(n)
+    out = np.zeros(n, dtype=np.float32)
     prog = [(57, [0, 3, 7]), (53, [0, 4, 7]), (48, [0, 4, 7]), (55, [0, 4, 7])]   # Am F C G
     if rng.random() < 0.5:
         prog = [(60, [0, 4, 7]), (55, [0, 4, 7]), (57, [0, 3, 7]), (53, [0, 4, 7])]   # C G Am F
@@ -692,16 +745,16 @@ def synth_music(total_s, seed=None):
 
 
 def _mix_and_write(path, total_s, events, voices, music=None, music_gain=0.55, voice_gain=0.95):
-    buf = np.zeros(int(total_s * SR) + SR, dtype=np.float64)
+    buf = np.zeros(int(total_s * SR) + SR, dtype=np.float32)
     if music is not None:
-        gain = np.ones(len(buf))
-        for t0, arr in voices:                              # hudba se pod hlasem ztiší
-            a, b = int(t0 * SR), int(t0 * SR) + len(arr)
-            gain[a:b] = 0.35
-        k = int(0.15 * SR)
-        gain = np.convolve(gain, np.ones(k) / k, mode="same")
+        step = 441                                          # ztlumení hudby pod hlasem se počítá hrubě (100 hodnot za sekundu)
+        gain = np.ones(len(buf) // step + 2)
+        for t0, arr in voices:
+            gain[int(t0 * SR) // step: (int(t0 * SR) + len(arr)) // step + 1] = 0.35
+        gain = np.convolve(gain, np.ones(15) / 15, mode="same")
         m = music[: len(buf)]
-        buf[: len(m)] += m * gain[: len(m)] * music_gain
+        g = np.interp(np.arange(len(m)) / step, np.arange(len(gain)), gain).astype(np.float32)
+        buf[: len(m)] += m * g * music_gain
     for t0, f, d, v in events:
         _tone(buf, t0, f, d, v)
     for t0, arr in voices:
@@ -721,7 +774,7 @@ def _mix_and_write(path, total_s, events, voices, music=None, music_gain=0.55, v
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None, lang="cs", results=None):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None, lang="cs", results=None, fmt="short", think_s=None):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také.
     lang: "cs" nebo "en" (anglická verze bere texty z polí a_en / b_en). results: stejná procenta pro obě verze."""
     rounds, title = video["rounds"], video["title"]
@@ -731,6 +784,9 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
     lab = LABELS[lang]
     phrases = _PHRASES_EN if lang == "en" else _PHRASES
     results = results or make_results(len(rounds))
+    wide = fmt == "long"
+    count_s = int(think_s or (LONG_THINK_S if wide else COUNT_S))
+    min_read = 3.2 if wide else MIN_READ_S
     seq, events, voices = [], [], []
     failed_img = set()
     voice_name = VOICES.get(voice or "off")
@@ -770,6 +826,11 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             img.save(p)
             seq.append((p, dur))
 
+        def fr(rnd, i, pics, count=None, reveal=None, lang="cs"):
+            if wide:
+                return _frame_wide(rnd, count=count, reveal=reveal, pics=pics, lang=lang)
+            return _frame(rnd, i, len(rounds), title, pics, count=count, reveal=reveal, lang=lang)
+
         used_phrases = []
         for i, (rnd, res) in enumerate(zip(rounds, results), 1):
             pics = _pictures(rnd, cache_dir, failed_img, photo)
@@ -780,13 +841,13 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             events.append((t, 520, 0.18, 0.35))
             if arr is not None:
                 voices.append((t + 0.25, arr))
-            read = max(MIN_READ_S, dur + 0.7)
-            add(_frame(rnd, i, len(rounds), title, pics, lang=lang), read)
+            read = max(min_read, dur + 0.7)
+            add(fr(rnd, i, pics, lang=lang), read)
             t += read
 
-            for n in range(COUNT_S, 0, -1):
-                events.append((t, 784 if n > 1 else 1046, 0.16, 0.4))
-                add(_frame(rnd, i, len(rounds), title, pics, count=n, lang=lang), 1.0)
+            for n in range(count_s, 0, -1):
+                events.append((t, 784 if n > 1 else 1046, 0.16, 0.4 if n <= 3 else 0.22))
+                add(fr(rnd, i, pics, count=n, lang=lang), 1.0)
                 t += 1.0
 
             winner = rnd["a"] if res["win"] == "a" else rnd["b"]
@@ -803,15 +864,15 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
             for s in range(1, steps):
                 part = s / steps
                 grow = {**res, "pct_win": int(res["pct_win"] * part), "pct_lose": int(res["pct_lose"] * part)}
-                add(_frame(rnd, i, len(rounds), title, pics, reveal=grow, lang=lang), step_s)
-            add(_frame(rnd, i, len(rounds), title, pics, reveal=res, lang=lang), reveal_s - step_s * (steps - 1))
+                add(fr(rnd, i, pics, reveal=grow, lang=lang), step_s)
+            add(fr(rnd, i, pics, reveal=res, lang=lang), reveal_s - step_s * (steps - 1))
             t += reveal_s
 
         arr, dur = say(lab["end_say"], "end")
         if arr is not None:
             voices.append((t + 0.2, arr))
         events += [(t, 784, 0.3, 0.4), (t + 0.12, 1046, 0.4, 0.4)]
-        add(_end_frame(title, lang), max(END_S, dur + 0.8))
+        add(_end_frame_wide(lang) if wide else _end_frame(title, lang), max(END_S, dur + 0.8))
         t += max(END_S, dur + 0.8)
 
         audio = tmp / "audio.wav"
@@ -827,8 +888,8 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
 
         res = subprocess.run(
             [ffmpeg_path(), "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"),
-             "-i", str(audio), "-vf", f"fps={FPS},format=yuv420p", "-c:v", "libx264", "-preset", "veryfast",
-             "-crf", "20", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", str(out_path)],
+             "-i", str(audio), "-vf", f"fps={FPS if not wide else 24},format=yuv420p", "-c:v", "libx264", "-preset", "veryfast",
+             "-crf", "20" if not wide else "22", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", str(out_path)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
             **hidden_subprocess_kwargs(),
         )
@@ -844,7 +905,7 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None, languages=("cs",)):
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None, languages=("cs",), fmt="short", think_s=None):
     """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
@@ -861,13 +922,14 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
                 part = ((i - 1) * len(languages) + li) / (len(videos) * len(languages))
                 progress(5 + int(90 * part), f"Vytvářím video {i} z {len(videos)}" + (" (anglicky)" if en else ""))
             dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo,
-                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared)
+                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared, fmt=fmt, think_s=think_s)
             first = v["rounds"][0]
             a, b = (first.get("a_en") or first["a"], first.get("b_en") or first["b"]) if en else (first["a"], first["b"])
             results.append({
                 "file": name, "title": ((v.get("title_en") or v["title"]) + " (EN)") if en else v["title"], "score": 0,
                 "hook": f"{a} or {b}?" if en else f"{a} nebo {b}?",
-                "reason": f"{len(v['rounds'])} otázek, {int(dur)} s",
+                "reason": f"{len(v['rounds'])} otázek, {int(dur) // 60} min {int(dur) % 60} s" if dur >= 120 else f"{len(v['rounds'])} otázek, {int(dur)} s",
+                **({"wide": True} if fmt == "long" else {}),
             })
     (out_dir / "clips.json").write_text(
         json.dumps({"video": f"To nebo to: {topic or videos[0]['title']}", "id": folder_id, "clips": results},
