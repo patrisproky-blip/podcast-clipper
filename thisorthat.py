@@ -680,6 +680,17 @@ def synth(text, voice, tmp, name, eleven_key=None, speed=100, lang="cs"):
     return np.frombuffer(res.stdout, dtype="<i2").astype(np.float64) / 32768.0
 
 
+def shuffled_order(video):
+    """Pořadí otázek pro anglickou verzi: vždy jiné než české, ale pro dané video pokaždé stejné."""
+    n = len(video["rounds"])
+    order = list(range(n))
+    if n >= 2:
+        rng = random.Random(f"{video['title']}-{n}")
+        while order == list(range(n)):
+            rng.shuffle(order)
+    return order
+
+
 def clean_mix(mix):
     """Hlasitost hudby a hlasu a rychlost řeči z rozhraní, omezené na rozumné hodnoty."""
     mix = mix or {}
@@ -774,7 +785,7 @@ def _mix_and_write(path, total_s, events, voices, music=None, music_gain=0.55, v
 
 # ------------------------------------------------------------------ video
 
-def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None, lang="cs", results=None, fmt="short", think_s=None):
+def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=None, eleven_key=None, music=True, mix=None, lang="cs", results=None, fmt="short", think_s=None, shuffle=False):
     """voice: kód hlasu z VOICES nebo None. Hlas a obrázky jsou vždy volitelné, bez nich video vznikne také.
     lang: "cs" nebo "en" (anglická verze bere texty z polí a_en / b_en). results: stejná procenta pro obě verze."""
     rounds, title = video["rounds"], video["title"]
@@ -784,6 +795,11 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
     lab = LABELS[lang]
     phrases = _PHRASES_EN if lang == "en" else _PHRASES
     results = results or make_results(len(rounds))
+    if shuffle and len(rounds) >= 2:
+        # jiné pořadí otázek (i s jejich procenty), aby se verze od sebe lišily
+        order = shuffled_order(video)
+        rounds = [rounds[k] for k in order]
+        results = [results[k] for k in order]
     wide = fmt == "long"
     count_s = int(think_s or (LONG_THINK_S if wide else COUNT_S))
     min_read = 3.2 if wide else MIN_READ_S
@@ -922,8 +938,8 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
                 part = ((i - 1) * len(languages) + li) / (len(videos) * len(languages))
                 progress(5 + int(90 * part), f"Vytvářím video {i} z {len(videos)}" + (" (anglicky)" if en else ""))
             dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo,
-                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared, fmt=fmt, think_s=think_s)
-            first = v["rounds"][0]
+                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared, fmt=fmt, think_s=think_s, shuffle=en)
+            first = v["rounds"][shuffled_order(v)[0]] if en else v["rounds"][0]
             a, b = (first.get("a_en") or first["a"], first.get("b_en") or first["b"]) if en else (first["a"], first["b"])
             results.append({
                 "file": name, "title": ((v.get("title_en") or v["title"]) + " (EN)") if en else v["title"], "score": 0,
