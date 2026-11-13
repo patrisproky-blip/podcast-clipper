@@ -60,10 +60,21 @@ jobs:
         shell: pwsh
         run: 7z a -tzip PodcastClipper-Windows.zip .\dist\PodcastClipper
 
+      - name: Instalátor (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ github.run_number }} installer.iss
+          Get-Item PodcastClipper-Setup.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: PodcastClipper-${{ matrix.label }}
-          path: PodcastClipper-*.zip
+          path: |
+            PodcastClipper-*.zip
+            PodcastClipper-Setup.exe
           retention-days: 30
 
       - name: Uložit výsledek samotestu
@@ -114,7 +125,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "Stáhněte PodcastClipper-Windows.zip, rozbalte a spusťte PodcastClipper.exe. Návod je v souboru README.md."
+            echo "Doporučeno: stáhněte PodcastClipper-Setup.exe a nainstalujte ho (ikona v nabídce Start i na ploše, bez práv správce). Alternativa bez instalace: PodcastClipper-Windows.zip, rozbalte a spusťte PodcastClipper.exe. Návod je v souboru README.md."
             echo; echo "Výsledek samotestu:"
             for f in selftests/*.log; do
               [ -e "$f" ] || continue
@@ -127,5 +138,7 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Podcast Clipper (sestavení ${{ github.run_number }})
           body_path: body.md
-          files: release/*.zip
+          files: |
+            release/*.zip
+            release/*.exe
           make_latest: true

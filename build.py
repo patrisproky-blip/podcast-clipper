@@ -121,6 +121,7 @@ def main():
         "--add-binary", f"{BUILD_BIN / ('ffmpeg.exe' if IS_WIN else 'ffmpeg')}{sep}bin",
         "--add-binary", f"{BUILD_BIN / ('deno.exe' if IS_WIN else 'deno')}{sep}bin",
         "--collect-data", "cv2",
+        *(["--icon", str(ROOT / "assets" / "icon.ico")] if IS_WIN and (ROOT / "assets" / "icon.ico").exists() else []),
     ]
     for mod in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "yt_dlp", "yt_dlp_ejs",
                 "anthropic", "certifi", "edge_tts", "aiohttp", "ddgs", "primp", "webview", "clr_loader", "pythonnet"):
