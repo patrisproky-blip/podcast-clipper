@@ -949,24 +949,46 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()[:40] or "video"
 
 
-def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None, languages=("cs",), fmt="short", think_s=None):
-    """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy)."""
+def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, photo=None, eleven_key=None, music=True, mix=None, languages=("cs",), fmt="short", think_s=None, short_rounds=6):
+    """Vyrobí všechna videa do složky ton-xxxxxx a zapíše clips.json (zobrazí se v záložce Klipy).
+    fmt: "short" (9:16), "long" (16:9) nebo "both" (jedno dlouhé video a z týchž otázek po skupinách krátká)."""
     folder_id = "ton-" + uuid.uuid4().hex[:6]
     out_dir = Path(out_root) / folder_id
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = cache_dir_for(out_root)
     results = []
+    # plán: (video, formát, název souboru bez přípony, procenta, popisek)
+    plan = []
     for i, v in enumerate(videos, 1):
-        shared = make_results(len(v["rounds"]))     # obě jazykové verze mají stejná procenta i vítěze
-        for li, lang in enumerate(languages):
+        shared = make_results(len(v["rounds"]))     # všechny verze téhož videa mají stejná procenta a vítěze
+        base = f"{i:02d}_{_slug(v['title'])}"
+        if fmt == "both":
+            plan.append((v, "long", f"{base}_dlouhe", shared, f"video {i}/{len(videos)}, dlouhé"))
+            n = max(2, int(short_rounds))
+            for k, s0 in enumerate(range(0, len(v["rounds"]), n), 1):
+                chunk = v["rounds"][s0:s0 + n]
+                if len(chunk) < 2 and k > 1:         # zbytek o jedné otázce se přidá k předchozímu videu
+                    plan[-1][0]["rounds"].extend(chunk)
+                    plan[-1][3].extend(shared[s0:s0 + n])
+                    continue
+                sub_v = {**v, "title": f"{v['title']} {k}", "title_en": f"{v['title_en']} {k}" if v.get("title_en") else "",
+                         "rounds": list(chunk)}
+                plan.append((sub_v, "short", f"{base}_short{k}", list(shared[s0:s0 + n]), f"video {i}/{len(videos)}, short {k}"))
+        else:
+            plan.append((v, fmt, base, shared, f"video {i}/{len(videos)}"))
+    total = len(plan) * len(languages)
+    done = 0
+    for v, f, base, shared, label in plan:
+        for lang in languages:
             en = lang == "en"
-            name = f"{i:02d}_{_slug(v['title'])}{'_en' if en else ''}.mp4"
-            log(f"Vytvářím video {i}/{len(videos)}{' (anglicky)' if en else ''}: {v['title']} ({len(v['rounds'])} otázek)")
+            name = f"{base}{'_en' if en else ''}.mp4"
+            log(f"Vytvářím {label}{' (anglicky)' if en else ''}: {v['title']} ({len(v['rounds'])} otázek)")
             if progress:
-                part = ((i - 1) * len(languages) + li) / (len(videos) * len(languages))
-                progress(5 + int(90 * part), f"Vytvářím video {i} z {len(videos)}" + (" (anglicky)" if en else ""))
+                progress(5 + int(90 * done / total), f"Vytvářím {label}" + (" (anglicky)" if en else ""))
             dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo,
-                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared, fmt=fmt, think_s=think_s, shuffle=en)
+                               eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=list(shared),
+                               fmt=f, think_s=think_s if f == "long" else None, shuffle=en)
+            done += 1
             first = v["rounds"][shuffled_order(v)[0]] if en else v["rounds"][0]
             if en and swap_flags(v)[0]:
                 first = _swap_round(first)
@@ -975,7 +997,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
                 "file": name, "title": ((v.get("title_en") or v["title"]) + " (EN)") if en else v["title"], "score": 0,
                 "hook": f"{a} or {b}?" if en else f"{a} nebo {b}?",
                 "reason": f"{len(v['rounds'])} otázek, {int(dur) // 60} min {int(dur) % 60} s" if dur >= 120 else f"{len(v['rounds'])} otázek, {int(dur)} s",
-                **({"wide": True} if fmt == "long" else {}),
+                **({"wide": True} if f == "long" else {}),
             })
     (out_dir / "clips.json").write_text(
         json.dumps({"video": f"To nebo to: {topic or videos[0]['title']}", "id": folder_id, "clips": results},

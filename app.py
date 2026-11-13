@@ -214,7 +214,8 @@ def worker():
                                               photo={"source": cfg["photo_source"], "pixabay_key": load_settings().get("pixabay_key")},
                                               eleven_key=load_settings().get("eleven_key"),
                                               music=bool(load_settings().get("ton_music", True)), mix=job.get("mix"), languages=job.get("languages") or ["cs"],
-                                              fmt=job.get("fmt", "short"), think_s=job.get("think_s"))
+                                              fmt=job.get("fmt", "short"), think_s=job.get("think_s"),
+                                              short_rounds=job.get("short_rounds", 6))
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
             elif job.get("phase") == "render":
                 # klipy vybrané ručně přes chat: zbývá je vytvořit
@@ -591,7 +592,7 @@ def api_job_render(jid):
 def _ton_params(data):
     topic = "\n".join(thisorthat.split_topics(data.get("topic")))[:600]
     n_topics = max(1, len(thisorthat.split_topics(topic)))
-    long = data.get("format") == "long"
+    long = data.get("format") in ("long", "both")
     max_rounds = thisorthat.MAX_ROUNDS_LONG if long else thisorthat.MAX_ROUNDS
     max_videos = thisorthat.MAX_VIDEOS_LONG if long else thisorthat.MAX_VIDEOS
     try:
@@ -668,7 +669,8 @@ def api_ton_generate():
         return jsonify(error="V odpovědi chybí anglické překlady. Znovu zkopírujte pokyny se zapnutou anglickou verzí "
                              "a pošlete je Claudovi, nebo anglickou verzi vypněte."), 400
     job.update(kind="ton", topic=topic, voice=voice, languages=["cs", "en"] if english else ["cs"],
-               fmt="long" if data.get("format") == "long" else "short",
+               fmt=data.get("format") if data.get("format") in ("long", "both") else "short",
+               short_rounds=max(2, min(12, int(data.get("short_rounds") or 6))) if str(data.get("short_rounds") or "6").isdigit() else 6,
                think_s=max(3, min(20, int(data.get("think_s") or thisorthat.LONG_THINK_S))) if str(data.get("think_s") or "8").isdigit() else thisorthat.LONG_THINK_S, mix=thisorthat.clean_mix(data.get("mix")), videos=vids, ton_request={"topic": topic, "rounds": rounds, "videos": videos, "english": english})
     job_queue.put(job["id"])
     return jsonify(_public_job(job))

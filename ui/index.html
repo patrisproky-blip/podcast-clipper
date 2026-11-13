@@ -166,9 +166,10 @@ a:hover{text-decoration:underline}
         <textarea id="ton_topic" rows="2" placeholder="například jídlo&#10;filmy&#10;škola" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--panel);color:var(--text);font:inherit;resize:vertical"></textarea></div>
       <div class="row">
         <div class="field"><label for="ton_format">Formát videa</label>
-          <select id="ton_format" onchange="tonFormat()"><option value="short">Krátké video (9:16, Shorts, TikTok)</option><option value="long">Dlouhé video (16:9, klasické YouTube)</option></select></div>
+          <select id="ton_format" onchange="tonFormat()"><option value="short">Krátké video (9:16, Shorts, TikTok)</option><option value="long">Dlouhé video (16:9, klasické YouTube)</option><option value="both">Obojí: dlouhé video a z týchž otázek krátké videa (shorty)</option></select></div>
         <div class="field"><label for="ton_rounds">Otázek v jednom videu</label><input id="ton_rounds" oninput="tonLen()" type="number" min="2" max="12" value="6"></div>
         <div class="field" id="think_field" style="display:none"><label for="ton_think">Čas na rozhodnutí u každé otázky (s)</label><input id="ton_think" oninput="tonLen()" type="number" min="3" max="20" value="8"></div>
+        <div class="field" id="short_field" style="display:none"><label for="ton_short_rounds">Otázek v jednom krátkém videu</label><input id="ton_short_rounds" oninput="tonLen()" type="number" min="2" max="12" value="6"></div>
         <div class="hint" id="ton_len" style="display:none"></div>
         <div class="field"><label for="ton_videos">Videí na jedno téma</label><input id="ton_videos" type="number" min="1" max="20" value="1"></div>
       </div>
@@ -468,7 +469,7 @@ function mixInit(){
     show(); el.addEventListener("input",()=>{ show(); try{ localStorage.setItem("mix",JSON.stringify(mixVals())); }catch(e){} });
   }
 }
-function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals(), english:$("ton_en").checked, format:$("ton_format").value, think_s:$("ton_think").value}; }
+function tonBody(){ return {topic:$("ton_topic").value, rounds:$("ton_rounds").value, videos:$("ton_videos").value, voice:$("ton_voice").value, mix:mixVals(), english:$("ton_en").checked, format:$("ton_format").value, think_s:$("ton_think").value, short_rounds:$("ton_short_rounds").value}; }
 async function tonCopy(){
   try{ const r=await api("/api/ton/prompt","POST",tonBody());
     await navigator.clipboard.writeText(r.prompt); toast("Pokyny zkopírovány. Vložte je do chatu s Claude."); }
@@ -515,16 +516,18 @@ function tonRender(){
 }
 async function stopJob(id){ if(!confirm("Zastavit zpracování? Rozdělaná práce se zahodí.")) return; try{ await api(`/api/jobs/${id}/stop`,"POST"); queueSig=""; refresh(); }catch(e){ alert(e.message); } }
 function tonFormat(){
-  const long=$("ton_format").value==="long", r=$("ton_rounds");
+  const fm=$("ton_format").value, long=fm!=="short", r=$("ton_rounds");
+  $("short_field").style.display=fm==="both"?"":"none";
   $("think_field").style.display=long?"":"none"; $("ton_len").style.display=long?"":"none";
   r.max=long?60:12; if(long&&+r.value<=12) r.value=36; if(!long&&+r.value>12) r.value=6;
   $("ton_videos").max=long?5:20; if(long&&+$("ton_videos").value>5) $("ton_videos").value=1;
   tonLen();
 }
 function tonLen(){
-  if($("ton_format").value!=="long") return;
+  if($("ton_format").value==="short") return;
   const per=2.5+ +$("ton_think").value+4, min=Math.round(+$("ton_rounds").value*per/60);
-  $("ton_len").textContent=`Jedno video bude trvat zhruba ${min} min. Pro 8 až 10 minut zvolte kolem 36 otázek a 8 sekund na rozhodnutí.`;
+  const sr=Math.max(2,+$("ton_short_rounds").value||6), n=Math.ceil(+$("ton_rounds").value/sr);
+  $("ton_len").textContent=`Dlouhé video bude trvat zhruba ${min} min. Pro 8 až 10 minut zvolte kolem 36 otázek a 8 sekund na rozhodnutí.`+($("ton_format").value==="both"?` K němu vznikne asi ${n} krátkých videí po ${sr} otázkách.`:"");
 }
 let voiceAudio=null;
 async function voiceSample(){
