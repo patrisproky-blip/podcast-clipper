@@ -9,4 +9,5 @@ pyyaml
 flask
 edge-tts
 ddgs
+pywebview; sys_platform == "win32"
 certifi

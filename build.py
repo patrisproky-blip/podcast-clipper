@@ -123,7 +123,7 @@ def main():
         "--collect-data", "cv2",
     ]
     for mod in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "yt_dlp", "yt_dlp_ejs",
-                "anthropic", "certifi", "edge_tts", "aiohttp", "ddgs", "primp"):
+                "anthropic", "certifi", "edge_tts", "aiohttp", "ddgs", "primp", "webview", "clr_loader", "pythonnet"):
         if has(mod):
             args += ["--collect-all", mod]
         elif mod in REQUIRED:

@@ -73,3 +73,5 @@ Spuštění ze zdrojů: `pip install -r requirements.txt` a `python app.py` (pot
 ## Novinky
 - Videa „To nebo to“ mají hudbu na pozadí (vlastní smyčka, ztiší se pod hlasem; jde vypnout v Nastavení) a procenta se rozjedou od nuly.
 - Nové rozložení podcastu „jeden velký záběr, kamera sleduje mluvčího“: aplikace pozná, kdo zrovna mluví, podle pohybu úst a kameru na něj přepne.
+
+- Aplikace se otevře ve vlastním okně (Windows, pomocí Microsoft Edge WebView2). Zavření okna aplikaci ukončí. Když okno nejde otevřít, otevře se prohlížeč; prohlížeč si můžete vynutit spuštěním s parametrem `--browser`.

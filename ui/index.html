@@ -583,21 +583,28 @@ async function ytPoll(){
   for(const [k,x] of Object.entries(u)){
     const b=document.getElementById("yt_"+k.replace("/","_")); if(!b) continue;
     if(x.status==="running"){ running=true; b.textContent=`Nahrávám ${x.pct}%`; b.disabled=true; }
-    else if(x.status==="done"){ b.textContent="Nahráno ✓"; b.disabled=false; b.onclick=()=>window.open(x.url,"_blank"); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
+    else if(x.status==="done"){ b.textContent="Nahráno ✓"; b.disabled=false; b.onclick=()=>openExternal(x.url); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
     else if(x.status==="error"){ b.textContent="Chyba, zkusit znovu"; b.disabled=false; b.title=x.error; if(!x.shown){ x.shown=1; alert(x.error);} }
   }
   if(running) ytTimer=setTimeout(ytPoll,1500);
 }
 async function ytSaveClient(){ try{ await api("/api/yt/client","POST",{json:$("yt_json").value}); $("yt_json").value=""; toast("Uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }catch(e){ alert(e.message); } }
-async function ytConnect(){ try{ const r=await api("/api/yt/connect","POST"); window.open(r.url,"_blank"); toast("Dokončete přihlášení v nové kartě"); }catch(e){ alert(e.message); } }
+async function ytConnect(){ try{ const r=await api("/api/yt/connect","POST"); openExternal(r.url); toast("Dokončete přihlášení v nové kartě"); }catch(e){ alert(e.message); } }
 async function ytDisconnect(){ if(!confirm("Odpojit YouTube?")) return; await api("/api/yt/disconnect","POST"); settingsLoaded=false; await refresh(); fillSettings(true); }
 async function delOutput(id){ if(!confirm("Smazat všechny klipy z tohoto videa?")) return; await api("/api/outputs/"+id,"DELETE"); loadClips(); }
 async function openFolder(){ try{ const r=await api("/api/open-folder","POST"); toast("Složka otevřena"); }catch(e){ toast(e.message); } }
+async function openExternal(url){
+  try{ await api("/api/open-url","POST",{url}); }catch(e){ window.open(url,"_blank"); }
+}
+document.addEventListener("click",e=>{
+  const a=e.target.closest&&e.target.closest('a[target="_blank"]');
+  if(a&&/^https?:/.test(a.href)){ e.preventDefault(); openExternal(a.href); }
+});
 async function quitApp(){
   const busy = state && state.jobs.some(j=>j.status==="running"||j.status==="queued");
   if(!confirm(busy ? "Právě se zpracovává video. Opravdu aplikaci ukončit? Rozpracované klipy se ztratí." : "Ukončit aplikaci? Přestanou se kontrolovat sledované kanály.")) return;
   try{ await api("/api/quit","POST"); }catch(e){}
-  document.body.innerHTML = '<div style="text-align:center;padding:90px 20px;font:16px system-ui">Aplikace je ukončená. Toto okno můžete zavřít.</div>';
+  document.body.innerHTML = '<div style="text-align:center;padding:90px 20px;font:16px system-ui">Aplikace je ukončená.</div>';
 }
 function copyText(t){ navigator.clipboard.writeText(t).then(()=>toast("Zkopírováno")); }
 

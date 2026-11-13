@@ -948,6 +948,16 @@ def api_ping():
     return jsonify(app=APP_ID)
 
 
+@app.post("/api/open-url")
+def api_open_url():
+    """Otevře odkaz v běžném prohlížeči (okno aplikace odkazy samo neotevírá)."""
+    url = str((request.json or {}).get("url") or "")
+    if not re.match(r"https?://", url):
+        return jsonify(error="Neplatný odkaz."), 400
+    webbrowser.open(url)
+    return jsonify(ok=True)
+
+
 @app.post("/api/quit")
 def api_quit():
     threading.Timer(0.5, lambda: os._exit(0)).start()
@@ -971,6 +981,32 @@ def _port_free(port):
             return True
         except OSError:
             return False
+
+
+def run_native_window(url, port):
+    """Spustí server na pozadí a ukáže aplikaci ve vlastním okně. Vrátí "closed" po zavření okna,
+    "fallback" když okno nejde otevřít (server pak běží dál pro prohlížeč) a None, když chybí knihovna."""
+    try:
+        import webview
+    except Exception:  # noqa: BLE001
+        return None
+    threading.Thread(target=lambda: app.run(host="127.0.0.1", port=port, threaded=True, use_reloader=False),
+                     daemon=True).start()
+    for _ in range(60):                                   # počkat, až server odpoví
+        if _is_our_app(port):
+            break
+        time.sleep(0.25)
+    try:
+        try:
+            webview.settings["ALLOW_DOWNLOADS"] = True    # stahování hlášení chyby a podobně
+        except Exception:  # noqa: BLE001
+            pass
+        webview.create_window("Podcast Clipper", url, width=1360, height=900, min_size=(1000, 680))
+        webview.start()
+        return "closed"
+    except Exception as e:  # noqa: BLE001
+        print(f"Okno aplikace se nepodařilo otevřít ({type(e).__name__}: {e}), použiji prohlížeč.")
+        return "fallback"
 
 
 def selftest():
@@ -1073,6 +1109,10 @@ def selftest():
             assert out.exists() and out.stat().st_size > 5000, "video To nebo to je prázdné"
             return f"{out.stat().st_size} B"
 
+    def t_window():
+        import webview
+        return f"pywebview {getattr(webview, '__version__', 'ok')} (okno potřebuje Microsoft Edge WebView2, ve Windows 10 a 11 bývá)"
+
     def t_voice_lib():
         import edge_tts  # noqa: F401
         import aiohttp  # noqa: F401
@@ -1121,6 +1161,7 @@ def selftest():
     check("ruční výběr momentů", t_manual)
     check("video To nebo to", t_ton)
     check("hlas (edge-tts)", t_voice_lib)
+    check("okno aplikace (pywebview)", t_window, required=False)
     check("výběr modelu přepisu", t_model_choice)
     check("anthropic", t_anthropic)
     check("rozhraní", t_ui)
@@ -1136,7 +1177,8 @@ def main():
     multiprocessing.freeze_support()
     p = argparse.ArgumentParser()
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--no-browser", action="store_true", help="jen server, bez okna a bez prohlížeče")
+    p.add_argument("--browser", action="store_true", help="místo okna aplikace otevřít prohlížeč")
     p.add_argument("--selftest", action="store_true", help="ověří sestavenou aplikaci a skončí")
     args = p.parse_args()
 
@@ -1170,8 +1212,16 @@ def main():
 
     url = f"http://127.0.0.1:{port}"
     print(f"Podcast Clipper běží na {url}  (ukončení: tlačítko Ukončit v aplikaci nebo Ctrl+C)")
-    if not args.no_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if args.no_browser:
+        app.run(host="127.0.0.1", port=port, threaded=True)
+        return
+    result = None if args.browser else run_native_window(url, port)
+    if result == "closed":
+        os._exit(0)                      # okno zavřeno: aplikace končí (rozdělané úlohy se po dalším spuštění obnoví)
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if result == "fallback":             # server už běží na pozadí, jen čekáme
+        while True:
+            time.sleep(3600)
     app.run(host="127.0.0.1", port=port, threaded=True)
 
 
