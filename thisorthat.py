@@ -691,6 +691,32 @@ def shuffled_order(video):
     return order
 
 
+def swap_flags(video):
+    """U kterých otázek (podle pozice v anglické verzi) se prohodí strany. Vždy aspoň jedna."""
+    n = len(video["rounds"])
+    rng = random.Random(f"strany-{video['title']}-{n}")
+    flags = [rng.random() < 0.5 for _ in range(n)]
+    if n and not any(flags):
+        flags[rng.randrange(n)] = True
+    return flags
+
+
+_PAIRS = (("a", "b"), ("a_en", "b_en"), ("pa", "pb"), ("la", "lb"), ("ea", "eb"), ("ka", "kb"), ("xa", "xb"))
+
+
+def _swap_round(rnd):
+    out = dict(rnd)
+    for x, y in _PAIRS:
+        vx, vy = rnd.get(x), rnd.get(y)
+        out.pop(x, None)
+        out.pop(y, None)
+        if vy is not None:
+            out[x] = vy
+        if vx is not None:
+            out[y] = vx
+    return out
+
+
 def clean_mix(mix):
     """Hlasitost hudby a hlasu a rychlost řeči z rozhraní, omezené na rozumné hodnoty."""
     mix = mix or {}
@@ -798,8 +824,10 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
     if shuffle and len(rounds) >= 2:
         # jiné pořadí otázek (i s jejich procenty), aby se verze od sebe lišily
         order = shuffled_order(video)
-        rounds = [rounds[k] for k in order]
-        results = [results[k] for k in order]
+        flags = swap_flags(video)
+        rounds = [_swap_round(rounds[k]) if flags[p] else rounds[k] for p, k in enumerate(order)]
+        results = [({**results[k], "win": "b" if results[k]["win"] == "a" else "a"} if flags[p] else results[k])
+                   for p, k in enumerate(order)]
     wide = fmt == "long"
     count_s = int(think_s or (LONG_THINK_S if wide else COUNT_S))
     min_read = 3.2 if wide else MIN_READ_S
@@ -940,6 +968,8 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
             dur = render_video(v, out_dir / name, voice=voice, cache_dir=cache_dir, log=log, photo=photo,
                                eleven_key=eleven_key, music=music, mix=mix, lang=lang, results=shared, fmt=fmt, think_s=think_s, shuffle=en)
             first = v["rounds"][shuffled_order(v)[0]] if en else v["rounds"][0]
+            if en and swap_flags(v)[0]:
+                first = _swap_round(first)
             a, b = (first.get("a_en") or first["a"], first.get("b_en") or first["b"]) if en else (first["a"], first["b"])
             results.append({
                 "file": name, "title": ((v.get("title_en") or v["title"]) + " (EN)") if en else v["title"], "score": 0,
