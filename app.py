@@ -72,6 +72,9 @@ def build_cfg():
     cfg["output_dir"] = str(DATA / "Klipy")
     cfg["state_file"] = str(DATA / "state.json")
     s = load_settings()
+    od = str(s.get("output_dir") or "")
+    if od and Path(od).is_absolute() and Path(od).is_dir():
+        cfg["output_dir"] = od
     for k in STR_KEYS + INT_KEYS[:3] + INT_KEYS[4:]:
         if s.get(k) not in (None, ""):
             cfg[k] = s[k]
@@ -512,6 +515,7 @@ def api_state():
         "channels": load_channels(),
         "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key", "yt_client", "yt_token")},
         "has_pixabay_key": bool(s.get("pixabay_key")),
+        "output_dir": build_cfg()["output_dir"], "default_output_dir": str(DATA / "Klipy"),
         "has_eleven_key": bool(s.get("eleven_key")),
         "yt_client": bool(s.get("yt_client")), "yt_connected": bool(s.get("yt_token")),
         "ton_music": bool(s.get("ton_music", True)),
@@ -795,6 +799,22 @@ def api_check_channels():
 def api_save_settings():
     data = request.json or {}
     s = load_settings()
+    if "output_dir" in data:
+        od = str(data["output_dir"] or "").strip().strip('"')
+        if not od:
+            s.pop("output_dir", None)
+        else:
+            p = Path(od).expanduser()
+            try:
+                if not p.is_absolute():
+                    raise ValueError("Zadejte celou cestu ke složce, například D:\\Videa.")
+                p.mkdir(parents=True, exist_ok=True)
+                probe = p / ".zapis-test"
+                probe.write_text("ok")
+                probe.unlink()
+            except Exception as e:  # noqa: BLE001
+                return jsonify(error=f"Do této složky nejde zapisovat ({e})."), 400
+            s["output_dir"] = str(p)
     if data.get("api_key"):
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
@@ -1009,6 +1029,20 @@ def api_yt_uploads():
 @app.get("/api/ping")
 def api_ping():
     return jsonify(app=APP_ID)
+
+
+@app.post("/api/pick-folder")
+def api_pick_folder():
+    """Otevře okno pro výběr složky (jen v okně aplikace)."""
+    try:
+        import webview
+        if not webview.windows:
+            raise RuntimeError("okno není k dispozici")
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        res = webview.windows[0].create_file_dialog(kind)
+    except Exception:  # noqa: BLE001
+        return jsonify(error="Výběr složky funguje jen v okně aplikace. Cestu můžete napsat do pole."), 400
+    return jsonify(path=(res[0] if res else None))
 
 
 @app.post("/api/open-url")

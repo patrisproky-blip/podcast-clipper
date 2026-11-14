@@ -302,6 +302,11 @@ a:hover{text-decoration:underline}
           <select id="s_cam_corner"><option value="br">Vpravo dole</option><option value="bl">Vlevo dole</option><option value="tr">Vpravo nahoře</option><option value="tl">Vlevo nahoře</option></select>
           <div class="hint">Šířka kamery v % obrazu:</div><input id="s_cam_size" type="number" min="10" max="50"></div>
       </div>
+      <div class="field">
+        <label for="s_outdir">Složka, kam se ukládají hotové klipy</label>
+        <div style="display:flex;gap:8px"><input id="s_outdir" type="text" placeholder="D:\Videa\Klipy" style="flex:1"><button class="small" onclick="pickFolder()">Vybrat složku…</button><button class="small" onclick="$('s_outdir').value=''">Výchozí</button></div>
+        <div class="hint">Nové klipy půjdou sem. Klipy vytvořené dřív zůstanou ve staré složce a v záložce Klipy se nezobrazí. Změna se projeví po uložení nastavení.</div>
+      </div>
       <label class="chk"><input id="s_keep_source" type="checkbox"> Ponechat stažené původní video (zabírá místo)</label>
 
       <h2 class="sec">Titulky</h2>
@@ -607,6 +612,9 @@ async function ytConnect(){ try{ const r=await api("/api/yt/connect","POST"); op
 async function ytDisconnect(){ if(!confirm("Odpojit YouTube?")) return; await api("/api/yt/disconnect","POST"); settingsLoaded=false; await refresh(); fillSettings(true); }
 async function delOutput(id){ if(!confirm("Smazat všechny klipy z tohoto videa?")) return; await api("/api/outputs/"+id,"DELETE"); loadClips(); }
 async function openFolder(){ try{ const r=await api("/api/open-folder","POST"); toast("Složka otevřena"); }catch(e){ toast(e.message); } }
+async function pickFolder(){
+  try{ const r=await api("/api/pick-folder","POST"); if(r.path) $("s_outdir").value=r.path; }catch(e){ toast(e.message); }
+}
 async function openExternal(url){
   try{ await api("/api/open-url","POST",{url}); }catch(e){ window.open(url,"_blank"); }
 }
@@ -656,7 +664,7 @@ function fillSettings(force){
   $("s_selection_mode").value=v("selection_mode")||"manual"; $("s_clip_style").value=v("clip_style")||"general"; $("keyfield").classList.toggle("hide",$("s_selection_mode").value!=="api"); $("s_language").value=v("language"); $("s_whisper_model").value=v("whisper_model")||"auto"; $("s_max_tr").value=v("max_transcribe_minutes")||45; $("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto");
   $("s_clips_per_video").value=v("clips_per_video"); $("s_min_clip_seconds").value=v("min_clip_seconds");
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
-  $("s_keep_source").checked=!!v("keep_source"); $("s_ton_music").checked=state.ton_music!==false;
+  $("s_keep_source").checked=!!v("keep_source"); $("s_outdir").value=(state.output_dir&&state.output_dir!==state.default_output_dir)?state.output_dir:""; $("s_ton_music").checked=state.ton_music!==false;
   $("s_size").value=sub.size; $("s_color").value=sub.highlight_color;
   $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase; $("s_emph").checked=sub.emphasis!==false; $("s_hook").checked=sub.hook_overlay!==false;
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
@@ -672,7 +680,7 @@ async function saveSettings(){
     selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, layout_mode:$("s_layout_mode").value, stream_cam_corner:$("s_cam_corner").value, stream_cam_size:$("s_cam_size").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value, max_transcribe_minutes:$("s_max_tr").value,
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
-    keep_source:$("s_keep_source").checked, ton_music:$("s_ton_music").checked,
+    keep_source:$("s_keep_source").checked, output_dir:$("s_outdir").value.trim(), ton_music:$("s_ton_music").checked,
     subtitles:{style:$("s_style").value,size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked,emphasis:$("s_emph").checked,hook_overlay:$("s_hook").checked}
   };
   const key=$("s_key").value.trim(); if(key) body.api_key=key;

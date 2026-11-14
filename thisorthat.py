@@ -445,7 +445,8 @@ def _pictures(rnd, cache_dir, failed, photo=None):
 
 
 def cache_dir_for(out_root):
-    return Path(out_root).parent / "work" / "ton-cache" / "img"
+    """Dočasná složka obrázků. Je mimo složku s klipy, ať si ji uživatel může zvolit kamkoli."""
+    return Path(tempfile.gettempdir()) / "PodcastClipper-cache" / "img"
 
 
 def sanitize_videos(videos):
