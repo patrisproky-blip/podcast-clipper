@@ -64,7 +64,7 @@ def access_token(client, refresh):
                                   "refresh_token": refresh, "grant_type": "refresh_token"})["access_token"]
 
 
-def upload(path, title, description, privacy, client, refresh, tags=None, on_progress=None):
+def upload(path, title, description, privacy, client, refresh, tags=None, on_progress=None, publish_at=None):
     """Nahraje video. Vrátí odkaz na něj. Používá resumable upload po kouscích."""
     from pathlib import Path
     p = Path(path)
@@ -72,6 +72,9 @@ def upload(path, title, description, privacy, client, refresh, tags=None, on_pro
     token = access_token(client, refresh)
     meta = {"snippet": {"title": title[:100], "description": description[:4900], "tags": tags or [], "categoryId": "24"},
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False}}
+    if publish_at:      # plánované zveřejnění: YouTube ho zveřejní samo, počítač může být vypnutý
+        meta["status"]["privacyStatus"] = "private"
+        meta["status"]["publishAt"] = publish_at
     req = urllib.request.Request(
         UPLOAD_URL, data=json.dumps(meta).encode("utf-8"), method="POST",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8",

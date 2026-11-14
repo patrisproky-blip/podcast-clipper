@@ -1,5 +1,6 @@
 """Podcast Clipper – aplikace s grafickým rozhraním (běží lokálně, otevře se v prohlížeči)."""
 import argparse
+import datetime
 import json
 import logging
 import multiprocessing
@@ -993,6 +994,17 @@ def api_yt_upload():
     data = request.get_json(silent=True) or {}
     vid, fname = str(data.get("vid", "")), str(data.get("file", ""))
     privacy = data.get("privacy") if data.get("privacy") in ("private", "unlisted", "public") else "private"
+    publish_at = None
+    if data.get("publish_at"):
+        try:
+            dt = datetime.datetime.fromisoformat(str(data["publish_at"]).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            return jsonify(error="Neplatné datum zveřejnění."), 400
+        if dt <= datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5):
+            return jsonify(error="Čas zveřejnění musí být aspoň 5 minut v budoucnu."), 400
+        publish_at = dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     s = load_settings()
     if not s.get("yt_token"):
         return jsonify(error="YouTube není propojený. Propojte ho v Nastavení."), 400
@@ -1013,9 +1025,9 @@ def api_yt_upload():
 
     def run():
         try:
-            url = youtube.upload(path, title, desc, privacy, s["yt_client"], s["yt_token"], tags=["shorts"],
+            url = youtube.upload(path, title, desc, privacy, s["yt_client"], s["yt_token"], tags=["shorts"], publish_at=publish_at,
                                  on_progress=lambda f: yt_uploads[key].update(pct=int(f * 100)))
-            yt_uploads[key] = {"status": "done", "pct": 100, "url": url, "privacy": privacy}
+            yt_uploads[key] = {"status": "done", "pct": 100, "url": url, "privacy": privacy, "publish_at": publish_at}
         except Exception as e:  # noqa: BLE001
             yt_uploads[key] = {"status": "error", "error": str(e)[:300]}
 

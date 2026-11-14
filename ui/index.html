@@ -274,6 +274,12 @@ a:hover{text-decoration:underline}
           <button class="small danger" onclick="ytDisconnect()">Odpojit</button>
         </div>
       </div>
+      <div class="field"><label for="s_yt_when">Naplánovat zveřejnění (nepovinné)</label>
+        <input id="s_yt_when" type="datetime-local">
+        <div class="hint">Prázdné = platí viditelnost níže. Vyplněné = video se nahraje jako soukromé a YouTube ho samo zveřejní v daný čas, počítač může být vypnutý.</div>
+        <label for="s_yt_gap" style="margin-top:8px">Rozestup mezi klipy (hodiny)</label>
+        <input id="s_yt_gap" type="number" min="0" value="24">
+        <div class="hint">Po každém nahrání se čas posune o tento rozestup, takže další klip vyjde později. 0 = všechny ve stejný čas.</div></div>
       <div class="field"><label for="s_yt_privacy">Viditelnost nahraných videí</label>
         <select id="s_yt_privacy"><option value="private">Soukromé</option><option value="unlisted">Neveřejné</option><option value="public">Veřejné</option></select>
         <div class="hint">Dokud Google projekt neschválí, YouTube nahraná videa stejně nastaví jako soukromá. Přepnete je pak ručně na kanálu.</div></div>
@@ -594,7 +600,13 @@ async function loadClips(){
 }
 async function ytUpload(vid,file){
   const priv=$("s_yt_privacy")?$("s_yt_privacy").value:"private";
-  try{ await api("/api/yt/upload","POST",{vid,file,privacy:priv}); toast("Nahrávám na YouTube…"); ytPoll(); }catch(e){ alert(e.message); }
+  const w=$("s_yt_when")&&$("s_yt_when").value; const body={vid,file,privacy:priv};
+  if(w) body.publish_at=new Date(w).toISOString();
+  try{
+    await api("/api/yt/upload","POST",body); toast(w?"Nahrávám a plánuji zveřejnění…":"Nahrávám na YouTube…"); ytPoll();
+    const gap=parseFloat($("s_yt_gap").value)||0;
+    if(w&&gap>0){ const d=new Date(new Date(w).getTime()+gap*3600000); const p=n=>String(n).padStart(2,"0"); $("s_yt_when").value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+  }catch(e){ alert(e.message); }
 }
 let ytTimer=null;
 async function ytPoll(){
@@ -604,7 +616,7 @@ async function ytPoll(){
   for(const [k,x] of Object.entries(u)){
     const b=document.getElementById("yt_"+k.replace("/","_")); if(!b) continue;
     if(x.status==="running"){ running=true; b.textContent=`Nahrávám ${x.pct}%`; b.disabled=true; }
-    else if(x.status==="done"){ b.textContent="Nahráno ✓"; b.disabled=false; b.onclick=()=>openExternal(x.url); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
+    else if(x.status==="done"){ b.textContent=x.publish_at?"Naplánováno ✓":"Nahráno ✓"; b.disabled=false; b.onclick=()=>openExternal(x.url); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
     else if(x.status==="error"){ b.textContent="Chyba, zkusit znovu"; b.disabled=false; b.title=x.error; if(!x.shown){ x.shown=1; alert(x.error);} }
   }
   if(running) ytTimer=setTimeout(ytPoll,1500);
