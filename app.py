@@ -350,12 +350,75 @@ def api_update():
                 rel = json.loads(r.read().decode("utf-8"))
             m = re.fullmatch(r"build-(\d+)", rel.get("tag_name", ""))
             if m:
-                data = {"latest": int(m.group(1)), "url": rel.get("html_url")}
+                asset = next((a for a in rel.get("assets", []) if a.get("name") == "PodcastClipper-Setup.exe"), None)
+                data = {"latest": int(m.group(1)), "url": rel.get("html_url"),
+                        "installer": asset.get("browser_download_url") if asset else None,
+                        "size": asset.get("size") if asset else None,
+                        "sha256": (asset.get("digest") or "").removeprefix("sha256:") if asset else ""}
         except Exception:  # noqa: BLE001
             data = {}
         update_cache.update(t=time.time(), data=data)
     d = update_cache["data"]
-    return jsonify(available=bool(d) and d["latest"] > cur, current=cur, latest=d.get("latest"), url=d.get("url"))
+    return jsonify(available=bool(d) and d["latest"] > cur, current=cur, latest=d.get("latest"), url=d.get("url"),
+                   can_install=bool(d.get("installer")) and FROZEN and sys.platform == "win32")
+
+
+UPDATE_PREFIX = "https://github.com/patrisproky-blip/podcast-clipper/releases/download/"
+update_state = {"stage": "idle", "pct": 0, "error": None}
+
+
+def _download_update(d):
+    """Stáhne instalátor z vydání, ověří ho a spustí potichu. Aplikace se při tom ukončí a instalátor ji spustí znovu."""
+    import hashlib
+    try:
+        url = d["installer"]
+        if not url.startswith(UPDATE_PREFIX):
+            raise ValueError("neočekávaná adresa instalátoru")
+        dest = Path(tempfile.gettempdir()) / "PodcastClipper-Setup.exe"
+        update_state.update(stage="download", pct=0, error=None)
+        h = hashlib.sha256()
+        req = urllib.request.Request(url, headers={"User-Agent": "podcast-clipper"})
+        with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as f:
+            total = int(r.headers.get("Content-Length") or d.get("size") or 0)
+            got = 0
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                got += len(chunk)
+                if total:
+                    update_state["pct"] = int(got * 100 / total)
+        if d.get("size") and got != d["size"]:
+            raise ValueError("stažený soubor je neúplný")
+        if d.get("sha256") and h.hexdigest().lower() != d["sha256"].lower():
+            raise ValueError("kontrolní součet nesouhlasí")
+        update_state.update(stage="install", pct=100)
+        subprocess.Popen([str(dest), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                         creationflags=0x00000008 | 0x00000200, close_fds=True)   # odpojený proces
+        time.sleep(1.5)
+        os._exit(0)
+    except Exception as e:  # noqa: BLE001
+        update_state.update(stage="error", error=f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/update/install")
+def api_update_install():
+    if not (FROZEN and sys.platform == "win32"):
+        return jsonify(error="Automatická aktualizace funguje jen v nainstalované aplikaci pro Windows."), 400
+    d = update_cache["data"]
+    if not d.get("installer") or d.get("latest", 0) <= (app_version() or 0):
+        return jsonify(error="Nová verze není k dispozici."), 400
+    if update_state["stage"] in ("download", "install"):
+        return jsonify(ok=True)
+    threading.Thread(target=_download_update, args=(dict(d),), daemon=True).start()
+    return jsonify(ok=True)
+
+
+@app.get("/api/update/status")
+def api_update_status():
+    return jsonify(update_state)
 
 
 @app.post("/api/jobs/<jid>/stop")

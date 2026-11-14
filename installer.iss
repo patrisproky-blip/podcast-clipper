@@ -38,3 +38,5 @@ Name: "{autodesktop}\Podcast Clipper"; Filename: "{app}\PodcastClipper.exe"; Tas
 
 [Run]
 Filename: "{app}\PodcastClipper.exe"; Description: "Spustit Podcast Clipper"; Flags: nowait postinstall skipifsilent
+; po automatické aktualizaci (tichý režim) se aplikace spustí sama
+Filename: "{app}\PodcastClipper.exe"; Flags: nowait; Check: WizardSilent

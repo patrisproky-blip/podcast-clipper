@@ -136,7 +136,7 @@ a:hover{text-decoration:underline}
   <button class="tab" data-tab="ton" onclick="showTab('ton')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h12l-3-3M19 15H7l3 3"/></svg>To nebo to</button>
   <button class="tab" data-tab="channels" onclick="showTab('channels')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="17" height="12" rx="2.5"/><path d="m9 3.5 3 3.5 3-3.5"/></svg>Kanály</button>
   <button class="tab" data-tab="settings" onclick="showTab('settings')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>Nastavení</button>
-  <div class="side-foot"><a id="updbanner" class="hide" target="_blank" rel="noopener" style="display:block;margin-bottom:8px;color:var(--accent);font-weight:600">Je dostupná nová verze</a><span>Zavřením okna aplikace neskončí, běží dál na pozadí.</span><button class="small" onclick="quitApp()">Ukončit aplikaci</button></div>
+  <div class="side-foot"><a id="updbanner" class="hide" target="_blank" rel="noopener" style="display:block;margin-bottom:8px;color:var(--accent);font-weight:600">Je dostupná nová verze</a><button id="updbtn" class="small primary hide" style="margin-bottom:8px" onclick="installUpdate()">Aktualizovat</button><span>Zavřením okna aplikace neskončí, běží dál na pozadí.</span><button class="small" onclick="quitApp()">Ukončit aplikaci</button></div>
 </aside>
 <main>
   <h1 class="hero">Z podcastu udělejte svislá videa</h1>
@@ -540,8 +540,22 @@ async function voiceSample(){
   }catch(e){ alert(e.message); }
   b.disabled=false; b.textContent="Poslechnout ukázku hlasu";
 }
+async function installUpdate(){
+  const busy = state && state.jobs.some(j=>j.status==="running"||j.status==="queued");
+  if(!confirm((busy?"Právě se zpracovává video. Po aktualizaci se rozdělaná práce obnoví od posledního uloženého místa.\n\n":"")+"Aplikace stáhne novou verzi (asi 250 MB), nainstaluje ji a sama se znovu spustí. Pokračovat?")) return;
+  const b=$("updbtn"); b.disabled=true;
+  try{ await api("/api/update/install","POST"); }catch(e){ alert(e.message); b.disabled=false; return; }
+  const t=setInterval(async()=>{
+    try{ const s=await api("/api/update/status");
+      if(s.stage==="download") b.textContent=`Stahuji… ${s.pct} %`;
+      else if(s.stage==="install") b.textContent="Instaluji, aplikace se restartuje…";
+      else if(s.stage==="error"){ clearInterval(t); b.disabled=false; b.textContent="Zkusit aktualizaci znovu"; alert("Aktualizace se nepodařila: "+s.error); }
+    }catch(e){ /* aplikace se právě ukončuje */ }
+  },1000);
+}
 async function checkUpdate(){
-  try{ const u=await api("/api/update"); if(u.available){ const a=$("updbanner"); a.href=u.url||"#"; a.textContent=`Je dostupná nová verze (${u.latest})`; a.classList.remove("hide"); } }catch(e){}
+  try{ const u=await api("/api/update"); if(u.available){ const a=$("updbanner"); a.href=u.url||"#"; a.textContent=`Je dostupná nová verze (${u.latest})`; a.classList.remove("hide");
+    if(u.can_install){ a.classList.add("hide"); $("updbtn").textContent=`Aktualizovat na verzi ${u.latest}`; $("updbtn").classList.remove("hide"); } } }catch(e){}
 }
 async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); queueSig=""; refresh(); }
 async function delJob(id){ if(state.jobs.find(j=>j.id===id)?.status==="waiting" && !confirm("Odebrat úlohu? Stažené video a přepis se smažou.")) return; await api(`/api/jobs/${id}`,"DELETE"); delete drafts[id]; delete promptCache[id]; delete reviewCache[id]; delete reviewDraft[id]; queueSig=""; refresh(); }
