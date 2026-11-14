@@ -1035,6 +1035,80 @@ def api_yt_upload():
     return jsonify(ok=True)
 
 
+def next_slot(after):
+    """Nejbližší termín po `after`: všední dny 14:00, víkendy 11:00 (místní čas), jeden za den."""
+    day = after.astimezone().date()
+    for _ in range(400):
+        hour = 14 if day.weekday() < 5 else 11
+        cand = datetime.datetime.combine(day, datetime.time(hour, 0)).astimezone()
+        if cand > after:
+            return cand
+        day += datetime.timedelta(days=1)
+
+
+@app.post("/api/yt/bulk")
+def api_yt_bulk():
+    """Hromadně nahraje klipy; každý naplánuje na další volný den (všední 14:00, víkend 11:00)."""
+    import youtube
+    data = request.get_json(silent=True) or {}
+    items = [(str(i.get("vid", "")), str(i.get("file", ""))) for i in data.get("items", []) if isinstance(i, dict)]
+    s = load_settings()
+    if not s.get("yt_token"):
+        return jsonify(error="YouTube není propojený. Propojte ho v Nastavení."), 400
+    root = Path(build_cfg()["output_dir"]).resolve()
+    jobs = []
+    for vid, fname in items:
+        folder = root / vid
+        path = (folder / fname).resolve()
+        if not re.fullmatch(r"[\w-]+", vid) or folder not in path.parents or not path.is_file():
+            continue
+        key = f"{vid}/{fname}"
+        if yt_uploads.get(key, {}).get("status") in ("running", "queued", "done"):
+            continue
+        meta = json.loads((folder / "clips.json").read_text(encoding="utf-8"))
+        clip = next((c for c in meta.get("clips", []) if c.get("file") == fname), {})
+        title = (clip.get("title") or fname).strip()
+        if "#shorts" not in title.lower():
+            title = title[:90].rstrip() + " #shorts"
+        desc = "\n".join(x for x in (clip.get("hook"), f"Zdroj: {clip['source_link']}" if clip.get("source_link") else "", "#shorts") if x)
+        jobs.append((key, path, title, desc))
+        yt_uploads[key] = {"status": "queued", "pct": 0}
+    if not jobs:
+        return jsonify(error="Není co nahrát (klipy už jsou nahrané nebo ve frontě)."), 400
+    now = datetime.datetime.now().astimezone()
+    last = s.get("yt_last_slot")
+    after = now + datetime.timedelta(minutes=10)
+    if last:
+        try:
+            after = max(after, datetime.datetime.fromisoformat(last))
+        except ValueError:
+            pass
+    slots = []
+    for _ in jobs:
+        after = next_slot(after)
+        slots.append(after)
+
+    def run():
+        for (key, path, title, desc), slot in zip(jobs, slots):
+            if slot <= datetime.datetime.now().astimezone() + datetime.timedelta(minutes=5):
+                slot = next_slot(datetime.datetime.now().astimezone() + datetime.timedelta(minutes=10))
+            pub = slot.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            yt_uploads[key] = {"status": "running", "pct": 0}
+            try:
+                url = youtube.upload(path, title, desc, "private", s["yt_client"], s["yt_token"], tags=["shorts"], publish_at=pub,
+                                     on_progress=lambda f, k=key: yt_uploads[k].update(pct=int(f * 100)))
+                yt_uploads[key] = {"status": "done", "pct": 100, "url": url, "privacy": "private", "publish_at": pub,
+                                   "when": slot.strftime("%d.%m. %H:%M")}
+                st = load_settings()
+                st["yt_last_slot"] = slot.isoformat()
+                save_settings(st)
+            except Exception as e:  # noqa: BLE001
+                yt_uploads[key] = {"status": "error", "error": str(e)[:300]}
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify(ok=True, count=len(jobs), first=slots[0].strftime("%d.%m. %H:%M"), last=slots[-1].strftime("%d.%m. %H:%M"))
+
+
 @app.get("/api/yt/uploads")
 def api_yt_uploads():
     return jsonify(yt_uploads)

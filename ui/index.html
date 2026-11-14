@@ -580,7 +580,8 @@ async function loadClips(){
   items.map(v=>`
     <div class="group">
       <div class="grouphead"><h3>${esc(v.video)}</h3>
-        <button class="small danger" onclick="delOutput('${esc(v.id)}')">Smazat</button></div>
+        <div class="actions" style="margin:0">${state&&state.yt_connected?`<button class="small" onclick="ytBulk('${esc(v.id)}')">Naplánovat vše na YouTube</button>`:""}
+        <button class="small danger" onclick="delOutput('${esc(v.id)}')">Smazat</button></div></div>
       <div class="grid">${v.clips.map(c=>`
         <div class="card clip${c.wide?" wide":""}">
           <div class="clipview"><video controls preload="metadata" src="/media/${esc(v.id)}/${encodeURIComponent(c.file)}#t=0.1"></video>${c.score?`<span class="score">Skóre ${esc(c.score)}</span>`:""}</div>
@@ -608,6 +609,11 @@ async function ytUpload(vid,file){
     if(w&&gap>0){ const d=new Date(new Date(w).getTime()+gap*3600000); const p=n=>String(n).padStart(2,"0"); $("s_yt_when").value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
   }catch(e){ alert(e.message); }
 }
+async function ytBulk(vid){
+  const v=(await api("/api/outputs")).find(x=>x.id===vid); if(!v) return;
+  if(!confirm(`Nahrát ${v.clips.length} klipů na YouTube a naplánovat je po jednom za den (všední dny 14:00, víkendy 11:00)?`)) return;
+  try{ const r=await api("/api/yt/bulk","POST",{items:v.clips.map(c=>({vid,file:c.file}))}); toast(`Nahrávám ${r.count} klipů, vyjdou od ${r.first} do ${r.last}`); ytPoll(); }catch(e){ alert(e.message); }
+}
 let ytTimer=null;
 async function ytPoll(){
   clearTimeout(ytTimer);
@@ -615,8 +621,9 @@ async function ytPoll(){
   let running=false;
   for(const [k,x] of Object.entries(u)){
     const b=document.getElementById("yt_"+k.replace("/","_")); if(!b) continue;
-    if(x.status==="running"){ running=true; b.textContent=`Nahrávám ${x.pct}%`; b.disabled=true; }
-    else if(x.status==="done"){ b.textContent=x.publish_at?"Naplánováno ✓":"Nahráno ✓"; b.disabled=false; b.onclick=()=>openExternal(x.url); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
+    if(x.status==="queued"){ running=true; b.textContent="Čeká na nahrání"; b.disabled=true; }
+    else if(x.status==="running"){ running=true; b.textContent=`Nahrávám ${x.pct}%`; b.disabled=true; }
+    else if(x.status==="done"){ b.textContent=x.publish_at?("Naplánováno "+(x.when||"")+" ✓"):"Nahráno ✓"; b.disabled=false; b.onclick=()=>openExternal(x.url); b.title=x.url+(x.privacy==="private"?" (soukromé)":""); }
     else if(x.status==="error"){ b.textContent="Chyba, zkusit znovu"; b.disabled=false; b.title=x.error; if(!x.shown){ x.shown=1; alert(x.error);} }
   }
   if(running) ytTimer=setTimeout(ytPoll,1500);
