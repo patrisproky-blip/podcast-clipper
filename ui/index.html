@@ -296,6 +296,8 @@ a:hover{text-decoration:underline}
         <div class="field"><label for="s_max_clip_seconds">Nejdelší klip (s)</label><input id="s_max_clip_seconds" type="number" min="15"></div>
       </div>
       <div class="row" style="margin-top:14px">
+        <div class="field"><label for="s_encoder">Kódování videa</label>
+          <select id="s_encoder"><option value="cpu">Procesor (nejlepší kvalita)</option><option value="auto">Grafická karta, pokud to jde (rychlejší)</option></select></div>
         <div class="field"><label for="s_layout_mode">Rozložení videa</label>
           <select id="s_layout_mode"><option value="auto">Podcast (dva lidé pod sebou)</option><option value="speaker">Podcast (jeden velký záběr, kamera sleduje mluvčího)</option><option value="stream">Stream (hra nahoře, kamera dole)</option></select></div>
         <div class="field" id="camfields"><label for="s_cam_corner">Kde je kamera ve streamu</label>
@@ -666,7 +668,7 @@ function fillSettings(force){
   $("s_max_clip_seconds").value=v("max_clip_seconds"); $("s_check_interval_min").value=s.check_interval_min ?? 60;
   $("s_keep_source").checked=!!v("keep_source"); $("s_outdir").value=(state.output_dir&&state.output_dir!==state.default_output_dir)?state.output_dir:""; $("s_ton_music").checked=state.ton_music!==false;
   $("s_size").value=sub.size; $("s_color").value=sub.highlight_color;
-  $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase; $("s_emph").checked=sub.emphasis!==false; $("s_hook").checked=sub.hook_overlay!==false;
+  $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_encoder").value=v("encoder")||"cpu"; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase; $("s_emph").checked=sub.emphasis!==false; $("s_hook").checked=sub.hook_overlay!==false;
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
   $("pixhint").textContent = state.has_pixabay_key ? "Klíč Pixabay je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.";
   $("elevenhint").textContent = state.has_eleven_key ? "Klíč ElevenLabs je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.";
@@ -677,7 +679,7 @@ function fillSettings(force){
 }
 async function saveSettings(){
   const body={
-    selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, layout_mode:$("s_layout_mode").value, stream_cam_corner:$("s_cam_corner").value, stream_cam_size:$("s_cam_size").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value, max_transcribe_minutes:$("s_max_tr").value,
+    selection_mode:$("s_selection_mode").value, clip_style:$("s_clip_style").value, layout_mode:$("s_layout_mode").value, encoder:$("s_encoder").value, stream_cam_corner:$("s_cam_corner").value, stream_cam_size:$("s_cam_size").value, language:$("s_language").value, whisper_model:$("s_whisper_model").value, max_transcribe_minutes:$("s_max_tr").value,
     clips_per_video:$("s_clips_per_video").value, min_clip_seconds:$("s_min_clip_seconds").value,
     max_clip_seconds:$("s_max_clip_seconds").value, check_interval_min:$("s_check_interval_min").value,
     keep_source:$("s_keep_source").checked, output_dir:$("s_outdir").value.trim(), ton_music:$("s_ton_music").checked,

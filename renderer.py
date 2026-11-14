@@ -24,6 +24,33 @@ def _ffmpeg(args):
         raise RuntimeError(f"ffmpeg selhal: {res.stderr.strip()[-300:]}")
 
 
+_ENC_CACHE = {}
+
+
+def gpu_encoder_ok():
+    """Zkusí 1s zkušební kódování přes AMD AMF; výsledek se pamatuje."""
+    if "amf" not in _ENC_CACHE:
+        ok = False
+        try:
+            r = subprocess.run(
+                [ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=1:r=30",
+                 "-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22",
+                 "-pix_fmt", "yuv420p", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=30, **hidden_subprocess_kwargs())
+            ok = r.returncode == 0
+        except Exception:
+            ok = False
+        _ENC_CACHE["amf"] = ok
+    return _ENC_CACHE["amf"]
+
+
+def video_encoder_args(mode):
+    """mode: auto|cpu|gpu. GPU (AMF) jen když zkouška projde, jinak vždy CPU x264."""
+    if mode in ("auto", "gpu") and gpu_encoder_ok():
+        return ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p"]
+
+
 def cut_segment(src, start, end, dst):
     _ffmpeg([
         "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{end - start:.3f}",
@@ -470,7 +497,7 @@ def render_clip(src, clip, words, cfg, out_path):
             "-i", str(seg),
             "-map", "0:v", "-map", "1:a?",
             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",   # vyrovnaná hlasitost jako na sociálních sítích
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+            *video_encoder_args(cfg.get("encoder", "cpu")),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart",
             str(out_path),
         ]

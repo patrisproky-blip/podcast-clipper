@@ -42,7 +42,7 @@ app = Flask(__name__)
 # ----------------------------------------------------------------- nastavení
 
 INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size", "max_transcribe_minutes")
-STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner", "photo_source")
+STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner", "photo_source", "encoder")
 
 
 def load_settings():
@@ -85,6 +85,8 @@ def build_cfg():
         cfg["selection_mode"] = "manual"
     if cfg.get("clip_style") not in ("general", "thisorthat", "stream"):
         cfg["clip_style"] = "general"
+    if cfg.get("encoder") not in ("auto", "cpu", "gpu"):
+        cfg["encoder"] = "cpu"
     if cfg.get("photo_source") not in ("web", "pixabay", "none"):
         cfg["photo_source"] = "web"
     if cfg.get("layout_mode") not in ("auto", "speaker", "stream"):
@@ -1258,6 +1260,9 @@ def selftest():
     check("ruční výběr momentů", t_manual)
     check("video To nebo to", t_ton)
     check("hlas (edge-tts)", t_voice_lib)
+    def t_gpu():
+        return "h264_amf " + ("funguje" if renderer.gpu_encoder_ok() else "nedostupný (použije se CPU)")
+    check("grafická karta (AMF)", t_gpu, required=False)
     check("okno aplikace (pywebview)", t_window, required=False)
     check("výběr modelu přepisu", t_model_choice)
     check("anthropic", t_anthropic)
