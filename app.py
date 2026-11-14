@@ -1261,6 +1261,7 @@ def selftest():
     check("video To nebo to", t_ton)
     check("hlas (edge-tts)", t_voice_lib)
     def t_gpu():
+        import renderer
         return "h264_amf " + ("funguje" if renderer.gpu_encoder_ok() else "nedostupný (použije se CPU)")
     check("grafická karta (AMF)", t_gpu, required=False)
     check("okno aplikace (pywebview)", t_window, required=False)
