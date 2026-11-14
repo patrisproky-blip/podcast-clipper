@@ -59,7 +59,8 @@ def setup_environment():
 def hidden_subprocess_kwargs():
     """Ve Windows zabrání vyskakování černých oken konzole při volání ffmpeg."""
     if IS_WIN:
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        # bez okna a s nižší prioritou, aby počítač během kódování videa zůstal použitelný
+        return {"creationflags": subprocess.CREATE_NO_WINDOW | 0x00004000}
     return {}
 
 

@@ -701,7 +701,7 @@ async function refresh(){
   const done=state.jobs.filter(j=>j.status==="done").length;
   if(lastDone!==-1 && done!==lastDone && tab==="clips") loadClips();
   lastDone=done;
-  setTimeout(refresh, active?2000:6000);
+  setTimeout(refresh, document.hidden ? 15000 : (active ? 2000 : 6000));
 }
 $("s_photo_source").addEventListener("change",()=>$("pixfield").classList.toggle("hide",$("s_photo_source").value!=="pixabay"));
 $("s_whisper_model").addEventListener("change",()=>$("maxtrfield").classList.toggle("hide",$("s_whisper_model").value!=="auto"));

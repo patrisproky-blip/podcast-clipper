@@ -26,7 +26,8 @@ def _friendly(exc):
 def _base_opts():
     setup_environment()
     opts = {"quiet": True, "no_warnings": True, "noprogress": True, "logger": None,
-            "retries": 8, "fragment_retries": 8, "extractor_retries": 3, "socket_timeout": 30}
+            "retries": 8, "fragment_retries": 8, "extractor_retries": 3, "socket_timeout": 30,
+            "concurrent_fragment_downloads": 4}
     b = bin_dir()
     if b:
         opts["ffmpeg_location"] = str(b)

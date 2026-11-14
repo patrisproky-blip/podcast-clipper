@@ -27,7 +27,7 @@ def _ffmpeg(args):
 def cut_segment(src, start, end, dst):
     _ffmpeg([
         "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{end - start:.3f}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", "-g", "30",   # jen mezisoubor: rychle, ne malé
         "-c:a", "aac", "-b:a", "192k", str(dst),
     ])
 
@@ -48,6 +48,25 @@ def _yunet():
     return None
 
 
+class _SeqReader:
+    """Čte vybrané snímky popořadě (grab) místo skákání na klíčové snímky, což je při analýze mnohem rychlejší."""
+
+    def __init__(self, cap):
+        self.cap, self.pos = cap, 0
+
+    def frame_at(self, i):
+        if i < self.pos:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            self.pos = i
+        while self.pos < i:
+            if not self.cap.grab():
+                return None
+            self.pos += 1
+        ok, fr = self.cap.read()
+        self.pos += 1
+        return fr if ok else None
+
+
 def analyze_faces(cap, fps, n_frames, step_s=0.5):
     global DETECTOR
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -61,18 +80,18 @@ def analyze_faces(cap, fps, n_frames, step_s=0.5):
         try:
             det.setInputSize((640, sh))
             gap = max(1, int(fps * 0.12))        # druhý snímek pro měření pohybu úst
+            reader = _SeqReader(cap)
             for i in range(0, n_frames, step):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-                ok, fr = cap.read()
-                if not ok:
+                fr = reader.frame_at(i)
+                if fr is None:
                     break
                 small = cv2.resize(fr, (640, sh))
                 _, found = det.detect(small)
                 acts = [0.0] * (0 if found is None else len(found))
                 if found is not None and len(found) >= 2:
                     # kdo mluví: u kterého obličeje se nejvíc mění spodní polovina (ústa) mezi dvěma snímky
-                    ok2, fr2 = cap.read() if gap == 1 else (cap.set(cv2.CAP_PROP_POS_FRAMES, i + gap) and cap.read())
-                    if ok2:
+                    fr2 = reader.frame_at(i + gap)
+                    if fr2 is not None:
                         g1 = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
                         g2 = cv2.cvtColor(cv2.resize(fr2, (640, sh)), cv2.COLOR_BGR2GRAY).astype(np.float32)
                         for k, f in enumerate(found):
@@ -101,10 +120,10 @@ def analyze_faces(cap, fps, n_frames, step_s=0.5):
     scale = 640.0 / W
     step = max(1, int(fps * step_s))
     times, faces_per = [], []
+    reader = _SeqReader(cap)
     for i in range(0, n_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-        ok, fr = cap.read()
-        if not ok:
+        fr = reader.frame_at(i)
+        if fr is None:
             break
         small = cv2.resize(fr, (640, int(H * scale)))
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
@@ -451,7 +470,7 @@ def render_clip(src, clip, words, cfg, out_path):
             "-i", str(seg),
             "-map", "0:v", "-map", "1:a?",
             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",   # vyrovnaná hlasitost jako na sociálních sítích
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart",
             str(out_path),
         ]

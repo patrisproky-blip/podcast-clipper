@@ -868,7 +868,7 @@ def render_video(video, out_path, voice=None, cache_dir=None, log=print, photo=N
 
         def add(img, dur):
             p = tmp / f"f{len(seq):03d}.png"
-            img.save(p)
+            img.save(p, compress_level=1)
             seq.append((p, dur))
 
         def fr(rnd, i, pics, count=None, reveal=None, lang="cs"):
