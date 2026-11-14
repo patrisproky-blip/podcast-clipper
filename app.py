@@ -1035,6 +1035,27 @@ def api_yt_upload():
     return jsonify(ok=True)
 
 
+def topic_key(title):
+    """„Barvy 2 (EN) #shorts“ -> „barvy“: videa na stejné téma se poznají podle názvu bez čísla."""
+    t = re.sub(r"#\w+|\(EN\)", "", str(title), flags=re.I)
+    t = re.sub(r"[\s\-–:#.]*\d+\s*$", "", t.strip())
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+def spread_topics(jobs, last_topic=None):
+    """Přeskládá klipy tak, aby dva se stejným tématem nešly hned po sobě (kde to jde)."""
+    groups = {}
+    for j in jobs:
+        groups.setdefault(j[4], []).append(j)
+    out, prev = [], last_topic
+    while any(groups.values()):
+        cands = [k for k, v in groups.items() if v and k != prev] or [k for k, v in groups.items() if v]
+        k = max(cands, key=lambda c: len(groups[c]))      # nejdřív z největší skupiny, ať se rozloží rovnoměrně
+        out.append(groups[k].pop(0))
+        prev = k
+    return out
+
+
 def next_slot(after):
     """Nejbližší termín po `after`: všední dny 14:00, víkendy 11:00 (místní čas), jeden za den."""
     day = after.astimezone().date()
@@ -1071,10 +1092,11 @@ def api_yt_bulk():
         if "#shorts" not in title.lower():
             title = title[:90].rstrip() + " #shorts"
         desc = "\n".join(x for x in (clip.get("hook"), f"Zdroj: {clip['source_link']}" if clip.get("source_link") else "", "#shorts") if x)
-        jobs.append((key, path, title, desc))
+        jobs.append((key, path, title, desc, topic_key(clip.get("title") or fname)))
         yt_uploads[key] = {"status": "queued", "pct": 0}
     if not jobs:
         return jsonify(error="Není co nahrát (klipy už jsou nahrané nebo ve frontě)."), 400
+    jobs = spread_topics(jobs, s.get("yt_last_topic"))
     now = datetime.datetime.now().astimezone()
     last = s.get("yt_last_slot")
     after = now + datetime.timedelta(minutes=10)
@@ -1089,7 +1111,7 @@ def api_yt_bulk():
         slots.append(after)
 
     def run():
-        for (key, path, title, desc), slot in zip(jobs, slots):
+        for (key, path, title, desc, topic), slot in zip(jobs, slots):
             if slot <= datetime.datetime.now().astimezone() + datetime.timedelta(minutes=5):
                 slot = next_slot(datetime.datetime.now().astimezone() + datetime.timedelta(minutes=10))
             pub = slot.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -1101,6 +1123,7 @@ def api_yt_bulk():
                                    "when": slot.strftime("%d.%m. %H:%M")}
                 st = load_settings()
                 st["yt_last_slot"] = slot.isoformat()
+                st["yt_last_topic"] = topic
                 save_settings(st)
             except Exception as e:  # noqa: BLE001
                 yt_uploads[key] = {"status": "error", "error": str(e)[:300]}
