@@ -1088,6 +1088,8 @@ def api_yt_bulk():
             continue
         meta = json.loads((folder / "clips.json").read_text(encoding="utf-8"))
         clip = next((c for c in meta.get("clips", []) if c.get("file") == fname), {})
+        if clip.get("lang") == "en" or str(clip.get("title", "")).rstrip().endswith("(EN)"):
+            continue          # anglické verze se jen stahují, nahráváš je ručně
         title = (clip.get("title") or fname).strip()
         if "#shorts" not in title.lower():
             title = title[:90].rstrip() + " #shorts"

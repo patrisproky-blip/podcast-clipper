@@ -999,6 +999,7 @@ def generate(videos, topic, out_root, voice="vlasta", log=print, progress=None, 
                 "hook": f"{a} or {b}?" if en else f"{a} nebo {b}?",
                 "reason": f"{len(v['rounds'])} otázek, {int(dur) // 60} min {int(dur) % 60} s" if dur >= 120 else f"{len(v['rounds'])} otázek, {int(dur)} s",
                 **({"wide": True} if f == "long" else {}),
+                **({"lang": "en"} if en else {}),
             })
     (out_dir / "clips.json").write_text(
         json.dumps({"video": f"To nebo to: {topic or videos[0]['title']}", "id": folder_id, "clips": results},

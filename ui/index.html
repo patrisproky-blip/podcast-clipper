@@ -592,7 +592,7 @@ async function loadClips(){
             <div class="actions" style="margin-top:auto">
               <a href="/media/${esc(v.id)}/${encodeURIComponent(c.file)}?dl=1"><button class="small primary">Stáhnout</button></a>
               <button class="small" onclick="copyText(${esc(JSON.stringify(c.title))})">Kopírovat název</button>
-              ${state&&state.yt_connected?`<button class="small" id="yt_${esc(v.id)}_${esc(c.file)}" onclick="ytUpload('${esc(v.id)}','${esc(c.file)}')">Nahrát na YouTube</button>`:""}
+              ${state&&state.yt_connected&&!isEn(c)?`<button class="small" id="yt_${esc(v.id)}_${esc(c.file)}" onclick="ytUpload('${esc(v.id)}','${esc(c.file)}')">Nahrát na YouTube</button>`:""}
             </div>
           </div>
         </div>`).join("")}</div>
@@ -609,10 +609,12 @@ async function ytUpload(vid,file){
     if(w&&gap>0){ const d=new Date(new Date(w).getTime()+gap*3600000); const p=n=>String(n).padStart(2,"0"); $("s_yt_when").value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
   }catch(e){ alert(e.message); }
 }
+const isEn=c=>c.lang==="en"||/\(EN\)\s*$/.test(c.title||"");
 async function ytBulk(vid){
   const v=(await api("/api/outputs")).find(x=>x.id===vid); if(!v) return;
-  if(!confirm(`Nahrát ${v.clips.length} klipů na YouTube a naplánovat je po jednom za den (všední dny 14:00, víkendy 11:00)?`)) return;
-  try{ const r=await api("/api/yt/bulk","POST",{items:v.clips.map(c=>({vid,file:c.file}))}); toast(`Nahrávám ${r.count} klipů, vyjdou od ${r.first} do ${r.last}`); ytPoll(); }catch(e){ alert(e.message); }
+  const list=v.clips.filter(c=>!isEn(c)); if(!list.length){ alert("Není co nahrát, anglické verze se nahrávají ručně."); return; }
+  if(!confirm(`Nahrát ${list.length} klipů na YouTube a naplánovat je po jednom za den (všední dny 14:00, víkendy 11:00)?`)) return;
+  try{ const r=await api("/api/yt/bulk","POST",{items:list.map(c=>({vid,file:c.file}))}); toast(`Nahrávám ${r.count} klipů, vyjdou od ${r.first} do ${r.last}`); ytPoll(); }catch(e){ alert(e.message); }
 }
 let ytTimer=null;
 async function ytPoll(){
