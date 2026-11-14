@@ -1266,6 +1266,7 @@ def main():
         print("Nenašel jsem volný port.")
         sys.exit(1)
 
+    (Path(tempfile.gettempdir()) / "PodcastClipper-Setup.exe").unlink(missing_ok=True)   # zbytek po aktualizaci
     _load_jobs()
     _clean_work()
     for jid in resume_ids:

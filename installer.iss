@@ -29,6 +29,11 @@ Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Vytvořit ikonu na ploše"; GroupDescription: "Zástupci:"
 
+[InstallDelete]
+; před instalací se smaže stará verze aplikace (vaše klipy a nastavení jsou jinde a zůstanou)
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\PodcastClipper.exe"
+
 [Files]
 Source: "dist\PodcastClipper\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
 
