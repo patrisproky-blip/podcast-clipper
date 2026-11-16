@@ -114,8 +114,16 @@ def process_video(url, cfg, log=print, progress=None):
     info, transcript = prepare_video(url, cfg, log, progress)
 
     log("Claude vybírá nejlepší momenty...")
-    prog(55, "Vybírám nejlepší momenty" if cfg.get("selection_mode") == "local" else "Claude vybírá nejlepší momenty")
-    if cfg.get("selection_mode") == "local":
+    prog(55, "Vybírám nejlepší momenty" if cfg.get("selection_mode") in ("local", "gemini") else "Claude vybírá nejlepší momenty")
+    if cfg.get("selection_mode") == "gemini":
+        from localselect import select_local
+        try:
+            from geminiselect import select_gemini
+            clips = select_gemini(transcript, cfg, cfg["gemini_key"], log)
+        except Exception as e:  # noqa: BLE001
+            log(f"Gemini nepomohlo ({e}), vybírám přímo v počítači.")
+            clips = select_local(transcript, cfg)
+    elif cfg.get("selection_mode") == "local":
         from localselect import select_local
         clips = select_local(transcript, cfg)
     else:

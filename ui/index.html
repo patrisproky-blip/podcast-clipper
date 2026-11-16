@@ -221,6 +221,7 @@ a:hover{text-decoration:underline}
         <select id="s_selection_mode">
           <option value="manual">Ručně přes chat Claude (zdarma)</option>
           <option value="local">Automaticky bez klíče (zdarma, jednodušší výběr)</option>
+          <option value="gemini">Automaticky přes Google Gemini (zdarma, chytřejší výběr)</option>
           <option value="api">Automaticky přes API klíč (placené podle spotřeby)</option>
         </select>
         <div class="hint">Ručně: aplikace připraví text, vy ho vložíte do chatu na claude.ai a odpověď vložíte zpět. Automaticky bez klíče: vše proběhne samo a zdarma, ale výběr je jednodušší (hledá hlasité, živé úseky, otázky a silná slova). Automaticky přes API: nejlepší výběr, ale API klíč vyžaduje předplacený kredit u Anthropic.</div>
@@ -253,7 +254,10 @@ a:hover{text-decoration:underline}
         <div class="hint" id="elevenhint">Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.</div>
       </div>
       <div class="field" id="pixfield">
-        <label for="s_pixabay">Klíč Pixabay</label>
+        <label for="s_gemini">Klíč Google Gemini (zdarma)</label>
+        <input id="s_gemini" type="password" placeholder="klíč z aistudio.google.com/apikey" autocomplete="off">
+        <div class="hint" id="gemhint">Zdarma: na aistudio.google.com/apikey se přihlásíte účtem Google a kliknete na „Create API key“. Bezplatná kvóta je omezená a Google v ní smí texty používat ke zlepšování svých služeb. Když Gemini nefunguje, aplikace vybere momenty sama v počítači.</div>
+        <label for="s_pixabay" style="margin-top:12px">Klíč Pixabay</label>
         <input id="s_pixabay" type="password" placeholder="klíč z pixabay.com/api/docs" autocomplete="off">
         <div class="hint" id="pixhint">Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.</div>
       </div>
@@ -695,6 +699,7 @@ function fillSettings(force){
   $("s_size").value=sub.size; $("s_color").value=sub.highlight_color;
   $("s_words").value=sub.words_per_line; $("s_style").value=sub.style||"karaoke"; $("s_layout_mode").value=v("layout_mode")||"auto"; $("s_encoder").value=v("encoder")||"cpu"; $("s_live_chunk").value=v("live_chunk_min")||30; $("s_cam_corner").value=v("stream_cam_corner")||"br"; $("s_cam_size").value=v("stream_cam_size")||26; $("camfields").classList.toggle("hide",$("s_layout_mode").value!=="stream"); $("s_upper").checked=!!sub.uppercase; $("s_emph").checked=sub.emphasis!==false; $("s_hook").checked=sub.hook_overlay!==false;
   $("keyhint").textContent = state.has_api_key ? "Klíč je uložený. Vyplň pole jen pokud ho chceš změnit." : "Získáš ho v Anthropic Console (console.anthropic.com). Ukládá se jen na tomto počítači.";
+  $("gemhint").dataset.has=state.has_gemini_key?"1":""; if(state.has_gemini_key) $("s_gemini").placeholder="klíč je uložený (vyplňte jen pro změnu)";
   $("pixhint").textContent = state.has_pixabay_key ? "Klíč Pixabay je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma se zaregistrujete na pixabay.com a klíč uvidíte na stránce pixabay.com/api/docs.";
   $("elevenhint").textContent = state.has_eleven_key ? "Klíč ElevenLabs je uložený. Vyplňte pole jen pokud ho chcete změnit." : "Zdarma je asi 10 minut namluveného hlasu měsíčně. Bezplatný účet nesmí sloužit ke komerčním účelům a u videa se má uvést „elevenlabs.io“.";
   $("yt_status").textContent = state.yt_connected ? "YouTube je propojený." : state.yt_client ? "Přístup uložen. Teď se přihlaste účtem Google." : "YouTube zatím není propojený.";
@@ -711,8 +716,8 @@ async function saveSettings(){
     subtitles:{style:$("s_style").value,size:$("s_size").value,highlight_color:$("s_color").value,words_per_line:$("s_words").value,uppercase:$("s_upper").checked,emphasis:$("s_emph").checked,hook_overlay:$("s_hook").checked}
   };
   const key=$("s_key").value.trim(); if(key) body.api_key=key;
-  const ek=$("s_eleven").value.trim(); if(ek) body.eleven_key=ek; const pk=$("s_pixabay").value.trim(); if(pk) body.pixabay_key=pk; body.photo_source=$("s_photo_source").value;
-  try{ await api("/api/settings","POST",body); $("s_key").value=""; $("s_pixabay").value=""; $("s_eleven").value=""; toast("Nastavení uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }
+  const ek=$("s_eleven").value.trim(); if(ek) body.eleven_key=ek; const gk=$("s_gemini").value.trim(); if(gk) body.gemini_key=gk; const pk=$("s_pixabay").value.trim(); if(pk) body.pixabay_key=pk; body.photo_source=$("s_photo_source").value;
+  try{ await api("/api/settings","POST",body); $("s_key").value=""; $("s_gemini").value=""; $("s_pixabay").value=""; $("s_eleven").value=""; toast("Nastavení uloženo"); settingsLoaded=false; await refresh(); fillSettings(true); }
   catch(e){ toast(e.message); }
 }
 

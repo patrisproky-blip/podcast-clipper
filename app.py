@@ -73,6 +73,7 @@ def build_cfg():
     cfg["output_dir"] = str(DATA / "Klipy")
     cfg["state_file"] = str(DATA / "state.json")
     s = load_settings()
+    cfg["gemini_key"] = s.get("gemini_key") or ""
     od = str(s.get("output_dir") or "")
     if od and Path(od).is_absolute() and Path(od).is_dir():
         cfg["output_dir"] = od
@@ -82,7 +83,7 @@ def build_cfg():
     if "keep_source" in s:
         cfg["keep_source"] = bool(s["keep_source"])
     cfg["subtitles"].update(s.get("subtitles", {}))
-    if cfg.get("selection_mode") not in ("manual", "api", "local"):
+    if cfg.get("selection_mode") not in ("manual", "api", "local", "gemini"):
         cfg["selection_mode"] = "manual"
     if cfg.get("clip_style") not in ("general", "thisorthat", "stream"):
         cfg["clip_style"] = "general"
@@ -210,8 +211,8 @@ def worker():
             cfg = build_cfg()
             if job.get("live"):
                 cfg["local_title"] = job["title"]
-                if not has_api_key():
-                    cfg["selection_mode"] = "local"       # živé části bez klíče: výběr přímo v počítači
+                if not has_api_key():       # živé části bez klíče Claude: Gemini (zdarma), jinak výběr přímo v počítači
+                    cfg["selection_mode"] = "gemini" if cfg["gemini_key"] else "local"
             if job.get("kind") == "ton":
                 if not job.get("videos"):
                     req = job["ton_request"]
@@ -234,7 +235,7 @@ def worker():
                 job.pop("pending_clips", None)
                 job.pop("prompts", None)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
-            elif cfg["selection_mode"] in ("api", "local") or (job.get("live") and has_api_key()):
+            elif cfg["selection_mode"] in ("api", "local", "gemini") or (job.get("live") and has_api_key()):
                 if cfg["selection_mode"] == "api" and not has_api_key():
                     raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení, nebo přepni na ruční výběr.")
                 results = process_video(job["url"], cfg, log, progress)
@@ -483,7 +484,7 @@ def api_report():
     """Zip pro hlášení chyb: protokoly, průběh úloh a nastavení bez klíčů."""
     import io
     import zipfile
-    secret = ("api_key", "pixabay_key", "eleven_key", "yt_client", "yt_token")
+    secret = ("api_key", "pixabay_key", "eleven_key", "gemini_key", "yt_client", "yt_token")
     info = {"verze": app_version(), "systém": platform.platform(), "python": sys.version.split()[0],
             "nastavení": {k: v for k, v in load_settings().items() if k not in secret}}
     buf = io.BytesIO()
@@ -520,8 +521,8 @@ def api_state():
         "selection_mode": build_cfg()["selection_mode"],
         "jobs": [_public_job(jobs[i]) for i in reversed(job_order) if i in jobs],
         "channels": load_channels(),
-        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key", "yt_client", "yt_token")},
-        "has_pixabay_key": bool(s.get("pixabay_key")),
+        "settings": {k: v for k, v in s.items() if k not in ("api_key", "pixabay_key", "eleven_key", "gemini_key", "yt_client", "yt_token")},
+        "has_pixabay_key": bool(s.get("pixabay_key")), "has_gemini_key": bool(s.get("gemini_key")),
         "output_dir": build_cfg()["output_dir"], "default_output_dir": str(DATA / "Klipy"),
         "has_eleven_key": bool(s.get("eleven_key")),
         "yt_client": bool(s.get("yt_client")), "yt_connected": bool(s.get("yt_token")),
@@ -864,6 +865,10 @@ def api_save_settings():
         s["api_key"] = data["api_key"].strip()
     if data.get("clear_api_key"):
         s.pop("api_key", None)
+    if data.get("gemini_key"):
+        s["gemini_key"] = str(data["gemini_key"]).strip()
+    elif data.get("clear_gemini_key"):
+        s.pop("gemini_key", None)
     if data.get("pixabay_key") is not None and "pixabay_key" in data:
         key = str(data["pixabay_key"]).strip()
         if key:
@@ -884,7 +889,7 @@ def api_save_settings():
         return jsonify(error="Neznámá poloha kamery."), 400
     if "clip_style" in data and data["clip_style"] not in ("general", "thisorthat", "stream"):
         return jsonify(error="Neznámý typ klipů."), 400
-    if "selection_mode" in data and data["selection_mode"] not in ("manual", "api", "local"):
+    if "selection_mode" in data and data["selection_mode"] not in ("manual", "api", "local", "gemini"):
         return jsonify(error="Neznámý způsob výběru momentů."), 400
     for k in STR_KEYS:
         if k in data:
