@@ -41,6 +41,9 @@ def prepare_video(url, cfg, log=print, progress=None):
         url, work, cfg["video_max_height"],
         on_progress=lambda f: prog(3 + int(12 * f), "Stahuji video"),
     )
+    if not info.get("id"):            # část živého streamu: lokální soubor
+        info["id"] = "live-" + slugify(Path(info["path"]).stem, 40)
+        info["title"] = cfg.get("local_title") or info["title"]
     vid = info["id"]
     log(f"Staženo: {info['title']}")
     prog(15, "Přepisuji řeč (první spuštění stáhne model, může to chvíli trvat)", title=info["title"], vid=vid)
@@ -88,7 +91,7 @@ def render_clips(info, transcript, clips, cfg, log=print, progress=None):
             **clip,
             "file": name,
             "layout": layout,
-            "source_link": f"https://youtu.be/{vid}?t={int(clip['start'])}",
+            **({"source_link": f"https://youtu.be/{vid}?t={int(clip['start'])}"} if info.get("url") else {}),
         })
 
     (out_dir / "clips.json").write_text(

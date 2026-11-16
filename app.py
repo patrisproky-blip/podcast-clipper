@@ -42,7 +42,7 @@ app = Flask(__name__)
 
 # ----------------------------------------------------------------- nastavení
 
-INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size", "max_transcribe_minutes")
+INT_KEYS = ("clips_per_video", "min_clip_seconds", "max_clip_seconds", "check_interval_min", "stream_cam_size", "max_transcribe_minutes", "live_chunk_min")
 STR_KEYS = ("language", "whisper_model", "whisper_device", "selection_mode", "clip_style", "layout_mode", "stream_cam_corner", "photo_source", "encoder")
 
 
@@ -76,7 +76,7 @@ def build_cfg():
     od = str(s.get("output_dir") or "")
     if od and Path(od).is_absolute() and Path(od).is_dir():
         cfg["output_dir"] = od
-    for k in STR_KEYS + INT_KEYS[:3] + INT_KEYS[4:]:
+    for k in STR_KEYS + INT_KEYS[:3] + INT_KEYS[4:-1]:
         if s.get(k) not in (None, ""):
             cfg[k] = s[k]
     if "keep_source" in s:
@@ -117,7 +117,7 @@ def _persist_jobs():
         j = jobs.get(i)
         if not j:
             continue
-        if j["status"] not in ("done", "error", "waiting", "queued", "running"):
+        if j["status"] not in ("done", "error", "waiting", "queued", "running") or j.get("kind") == "live":
             continue
         d = {k: v for k, v in j.items() if k != "log"}
         d["log"] = j["log"][-30:]
@@ -144,12 +144,12 @@ def _load_jobs():
             pass
 
 
-def add_job(url, title=None, source="ručně", start=True):
+def add_job(url, title=None, source="ručně", start=True, **extra):
     jid = uuid.uuid4().hex[:8]
     job = {
         "id": jid, "url": url, "title": title or url, "source": source,
         "status": "queued", "stage": "Čeká ve frontě", "pct": 0,
-        "log": [], "error": None, "clips": 0, "vid": None, "created": time.time(),
+        "log": [], "error": None, "clips": 0, "vid": None, "created": time.time(), **extra,
     }
     with jobs_lock:
         jobs[jid] = job
@@ -208,6 +208,8 @@ def worker():
 
         try:
             cfg = build_cfg()
+            if job.get("live"):
+                cfg["local_title"] = job["title"]
             if job.get("kind") == "ton":
                 if not job.get("videos"):
                     req = job["ton_request"]
@@ -230,7 +232,7 @@ def worker():
                 job.pop("pending_clips", None)
                 job.pop("prompts", None)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
-            elif cfg["selection_mode"] == "api":
+            elif cfg["selection_mode"] == "api" or (job.get("live") and has_api_key()):
                 if not has_api_key():
                     raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení, nebo přepni na ruční výběr.")
                 results = process_video(job["url"], cfg, log, progress)
@@ -526,13 +528,51 @@ def api_state():
     })
 
 
+LIVE_RE = re.compile(r"^https?://([\w-]+\.)?(twitch\.tv|kick\.com)/", re.I)
+
+
+def start_live(url):
+    """Spustí nahrávání živého streamu po částech; hotové části se samy zařadí ke zpracování."""
+    import live
+    info = live.probe(url)
+    sess = uuid.uuid4().hex[:6]
+    job = add_job(url, title=f"Živě: {info['title']}", source="živě", start=False, kind="live")
+    job.update(status="running", stage="Připojuji se ke streamu", pct=0, parts=0)
+    chunk_s = max(5, min(120, int(load_settings().get("live_chunk_min") or 30))) * 60
+    live_dir = DATA / "live"
+
+    def on_part(path, idx):
+        part = add_job(str(path), title=f"{info['title']} (část {idx})", source="živě", live=True,
+                       local_id=f"live-{sess}-{idx:03d}", stream_url=url)
+        job["parts"] = idx
+        job["log"].append(f"Část {idx} nahrána, zpracovává se.")
+
+    def run():
+        try:
+            live.record(url, live_dir, sess, chunk_s, on_part, lambda: bool(job.get("cancel")),
+                        lambda t: job.update(stage=t), log=lambda m: job["log"].append(str(m)))
+            job.update(status="done", pct=100, stage=f"Stream skončil, nahráno částí: {job.get('parts', 0)}")
+        except Exception as e:  # noqa: BLE001
+            job.update(status="error", stage="Chyba", error=str(e)[:400] or type(e).__name__)
+        job["cancel"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return job
+
+
 @app.post("/api/jobs")
 def api_add_job():
     url = (request.json or {}).get("url", "").strip()
-    if not YT_RE.match(url):
-        return jsonify(error="Zadej platný odkaz na YouTube video."), 400
-    if re.search(r"youtube\.com/(@|channel/|c/|user/)", url) and "watch?v=" not in url:
+    if not (YT_RE.match(url) or LIVE_RE.match(url)):
+        return jsonify(error="Zadej platný odkaz na YouTube, Twitch nebo Kick."), 400
+    if re.search(r"youtube\.com/(@|channel/|c/|user/)", url) and "watch?v=" not in url and "/live" not in url:
         return jsonify(error="Tohle je odkaz na kanál. Přidej ho v záložce Kanály."), 400
+    if LIVE_RE.match(url) or "/live" in url or "watch?v=" in url:
+        import live
+        if live.probe(url)["live"]:
+            return jsonify(_public_job(start_live(url)))
+    if LIVE_RE.match(url) and "/videos/" not in url and "/clip" not in url:
+        return jsonify(error="Stream právě neběží. Zadej odkaz, až bude živě."), 400
     return jsonify(_public_job(add_job(url)))
 
 

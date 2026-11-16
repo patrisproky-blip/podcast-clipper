@@ -69,6 +69,8 @@ def download_video(url, work_dir, max_height=1080, on_progress=None):
 
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
+    if not str(url).startswith(("http://", "https://")) and Path(url).is_file():
+        return {"id": None, "title": Path(url).stem, "duration": None, "path": str(url), "url": ""}     # lokální soubor (část živého streamu)
 
     def hook(d):
         if on_progress and d.get("status") == "downloading":
