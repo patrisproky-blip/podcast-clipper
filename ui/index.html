@@ -220,9 +220,10 @@ a:hover{text-decoration:underline}
         <label for="s_selection_mode">Jak se vybírají nejlepší momenty</label>
         <select id="s_selection_mode">
           <option value="manual">Ručně přes chat Claude (zdarma)</option>
+          <option value="local">Automaticky bez klíče (zdarma, jednodušší výběr)</option>
           <option value="api">Automaticky přes API klíč (placené podle spotřeby)</option>
         </select>
-        <div class="hint">Ručně: aplikace připraví text, vy ho vložíte do chatu na claude.ai a odpověď vložíte zpět. Automaticky: vše proběhne samo, ale API klíč vyžaduje předplacený kredit u Anthropic.</div>
+        <div class="hint">Ručně: aplikace připraví text, vy ho vložíte do chatu na claude.ai a odpověď vložíte zpět. Automaticky bez klíče: vše proběhne samo a zdarma, ale výběr je jednodušší (hledá hlasité, živé úseky, otázky a silná slova). Automaticky přes API: nejlepší výběr, ale API klíč vyžaduje předplacený kredit u Anthropic.</div>
       </div>
       <div class="field">
         <label for="s_clip_style">Jaké klipy hledat</label>

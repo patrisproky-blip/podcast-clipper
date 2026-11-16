@@ -114,8 +114,12 @@ def process_video(url, cfg, log=print, progress=None):
     info, transcript = prepare_video(url, cfg, log, progress)
 
     log("Claude vybírá nejlepší momenty...")
-    prog(55, "Claude vybírá nejlepší momenty")
-    clips = select_moments(transcript, cfg)
+    prog(55, "Vybírám nejlepší momenty" if cfg.get("selection_mode") == "local" else "Claude vybírá nejlepší momenty")
+    if cfg.get("selection_mode") == "local":
+        from localselect import select_local
+        clips = select_local(transcript, cfg)
+    else:
+        clips = select_moments(transcript, cfg)
     if not clips:
         log("Nenalezeny žádné vhodné momenty.")
         prog(100, "Hotovo (žádné vhodné momenty)")

@@ -82,7 +82,7 @@ def build_cfg():
     if "keep_source" in s:
         cfg["keep_source"] = bool(s["keep_source"])
     cfg["subtitles"].update(s.get("subtitles", {}))
-    if cfg.get("selection_mode") not in ("manual", "api"):
+    if cfg.get("selection_mode") not in ("manual", "api", "local"):
         cfg["selection_mode"] = "manual"
     if cfg.get("clip_style") not in ("general", "thisorthat", "stream"):
         cfg["clip_style"] = "general"
@@ -210,6 +210,8 @@ def worker():
             cfg = build_cfg()
             if job.get("live"):
                 cfg["local_title"] = job["title"]
+                if not has_api_key():
+                    cfg["selection_mode"] = "local"       # živé části bez klíče: výběr přímo v počítači
             if job.get("kind") == "ton":
                 if not job.get("videos"):
                     req = job["ton_request"]
@@ -232,8 +234,8 @@ def worker():
                 job.pop("pending_clips", None)
                 job.pop("prompts", None)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
-            elif cfg["selection_mode"] == "api" or (job.get("live") and has_api_key()):
-                if not has_api_key():
+            elif cfg["selection_mode"] in ("api", "local") or (job.get("live") and has_api_key()):
+                if cfg["selection_mode"] == "api" and not has_api_key():
                     raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení, nebo přepni na ruční výběr.")
                 results = process_video(job["url"], cfg, log, progress)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
@@ -882,7 +884,7 @@ def api_save_settings():
         return jsonify(error="Neznámá poloha kamery."), 400
     if "clip_style" in data and data["clip_style"] not in ("general", "thisorthat", "stream"):
         return jsonify(error="Neznámý typ klipů."), 400
-    if "selection_mode" in data and data["selection_mode"] not in ("manual", "api"):
+    if "selection_mode" in data and data["selection_mode"] not in ("manual", "api", "local"):
         return jsonify(error="Neznámý způsob výběru momentů."), 400
     for k in STR_KEYS:
         if k in data:
