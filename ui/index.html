@@ -581,10 +581,18 @@ async function checkUpdate(){
 async function retry(id){ await api(`/api/jobs/${id}/retry`,"POST"); queueSig=""; refresh(); }
 async function delJob(id){ if(state.jobs.find(j=>j.id===id)?.status==="waiting" && !confirm("Odebrat úlohu? Stažené video a přepis se smažou.")) return; await api(`/api/jobs/${id}`,"DELETE"); delete drafts[id]; delete promptCache[id]; delete reviewCache[id]; delete reviewDraft[id]; queueSig=""; refresh(); }
 
+let clipCat="all";
+const catOf=v=>String(v.id).startsWith("ton-")?"ton":String(v.id).startsWith("live-")?"live":"video";
+function setCat(c){ clipCat=c; loadClips(); }
 async function loadClips(){
-  const items = await api("/api/outputs");
-  if(!items.length){ $("tab-clips").innerHTML=`<div class="empty">Tady se objeví hotové klipy.<br>Vlož odkaz na podcast nahoře a spusť zpracování.</div>`; return; }
-  $("tab-clips").innerHTML = `<div class="actions" style="margin:0 0 16px"><button class="small" onclick="openFolder()">Otevřít složku s klipy</button></div>` +
+  const all = await api("/api/outputs");
+  if(!all.length){ $("tab-clips").innerHTML=`<div class="empty">Tady se objeví hotové klipy.<br>Vlož odkaz na podcast nahoře a spusť zpracování.</div>`; return; }
+  const cats=[["all","Vše"],["video","Z videí"],["live","Ze streamů"],["ton","To nebo to"]];
+  const cnt=k=>k==="all"?all.length:all.filter(v=>catOf(v)===k).length;
+  const items = clipCat==="all"?all:all.filter(v=>catOf(v)===clipCat);
+  const bar=`<div class="actions" style="margin:0 0 16px">${cats.map(([k,n])=>`<button class="small${clipCat===k?" primary":""}" onclick="setCat('${k}')">${n} (${cnt(k)})</button>`).join("")}<span style="flex:1"></span><button class="small" onclick="openFolder()">Otevřít složku s klipy</button></div>`;
+  if(!items.length){ $("tab-clips").innerHTML=bar+`<div class="empty">V této skupině zatím nic není.</div>`; return; }
+  $("tab-clips").innerHTML = bar +
   items.map(v=>`
     <div class="group">
       <div class="grouphead"><h3>${esc(v.video)}</h3>
