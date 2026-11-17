@@ -270,6 +270,48 @@ def _cam_box(W, H, cfg):
     return x, y, cw, min(ch, H)
 
 
+def detect_stream_layout(path):
+    """Zjistí z pár snímků, kde je ve streamu kamera. Vrátí {"corner": br|bl|tr|tl|none|speaker, "size": %}.
+    speaker = obličej přes celý obraz (povídání), none = žádná kamera (jen hra)."""
+    cap = cv2.VideoCapture(str(path))
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if n <= 0 or W <= 0:
+            return {"corner": "br", "size": 26}
+        # snímky z různých míst záznamu (ne jen z úvodu), asi 14 vzorků
+        step_s = max(0.5, n / fps / 14)
+        times, faces_per = analyze_faces(cap, fps, n, step_s=step_s)
+    finally:
+        cap.release()
+    total = max(1, len(times))
+    hits, widths, big = {}, {}, 0
+    for faces in faces_per:
+        seen = set()
+        for cx, cy, fw, *_ in faces:
+            nx, ny, rw = cx / W, cy / H, fw / W
+            if rw > 0.2:
+                big += 1
+                continue
+            if (nx < 0.38 or nx > 0.62) and (ny < 0.38 or ny > 0.62):
+                c = ("t" if ny < 0.5 else "b") + ("l" if nx < 0.5 else "r")
+                if c not in seen:
+                    seen.add(c)
+                    hits[c] = hits.get(c, 0) + 1
+                    widths.setdefault(c, []).append(rw)
+    if hits:
+        c = max(hits, key=hits.get)
+        if hits[c] >= 0.35 * total:
+            ws = sorted(widths[c])
+            size = int(max(16, min(40, ws[len(ws) // 2] * 100 * 2.4)))
+            return {"corner": c, "size": size}
+    if big >= 0.35 * total:
+        return {"corner": "speaker", "size": 26}
+    return {"corner": "none", "size": 26}
+
+
 def _compose_stream(frame, cfg):
     """Hra nahoře (na šířku, s rozmazaným pozadím), kamera dole (oříznutý výřez ze zdrojového obrazu)."""
     H, W = frame.shape[:2]
@@ -281,6 +323,10 @@ def _compose_stream(frame, cfg):
 
     gh = int(OUT_W * H / W)
     game = cv2.resize(frame, (OUT_W, gh), interpolation=cv2.INTER_AREA)
+    if cfg.get("stream_cam_corner") == "none":      # bez kamery: hra uprostřed celé výšky
+        gy = max(0, (OUT_H - gh) // 2)
+        bg[gy:gy + gh] = game[: OUT_H - gy]
+        return bg
     gy = max(0, (STREAM_SPLIT - gh) // 2)
     bg[gy:gy + gh] = game[: OUT_H - gy]
 

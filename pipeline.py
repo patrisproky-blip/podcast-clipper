@@ -71,6 +71,19 @@ def render_clips(info, transcript, clips, cfg, log=print, progress=None):
     """Z vybraných momentů vytvoří hotové klipy a zapíše clips.json."""
     prog = _prog(progress)
     vid = info["id"]
+    if cfg.get("auto_stream_layout"):           # živý stream: sám najde kameru a podle toho zvolí rozložení
+        try:
+            from renderer import detect_stream_layout
+            lay = detect_stream_layout(info["path"])
+            cfg = dict(cfg)
+            if lay["corner"] == "speaker":
+                cfg["layout_mode"] = "speaker"
+            else:
+                cfg.update(layout_mode="stream", stream_cam_corner=lay["corner"], stream_cam_size=lay["size"])
+            log(f"Rozložení streamu: {lay['corner']} ({lay['size']} %)")
+        except Exception as e:  # noqa: BLE001
+            log(f"Rozložení streamu se nepodařilo zjistit ({e}), použije se výchozí.")
+            cfg = dict(cfg, layout_mode="stream")
     if not Path(info["path"]).exists():
         raise FileNotFoundError("Stažené video už neexistuje. Smažte tuto úlohu a zadejte video znovu.")
 

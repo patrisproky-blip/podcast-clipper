@@ -19,12 +19,12 @@ _FILLER_START = re.compile(r"^(a|no|tak|takže|jo|ehm|hm|ale|protože|který|kte
 _NUM_RE = re.compile(r"\d")
 
 
-def _score_window(units):
+def _score_window(units, stream=False):
     text = " ".join(u["text"] for u in units)
     dur = max(1.0, units[-1]["end"] - units[0]["start"])
     words = len(text.split())
     s = 0.0
-    s += 35 * sum(1 for u in units if u.get("loud")) / len(units)          # hlasitost, emoce
+    s += (60 if stream else 35) * sum(1 for u in units if u.get("loud")) / len(units)   # hlasitost, emoce (u streamu nejdůležitější)
     s += 6 * min(4, text.count("?"))                                        # otázky
     s += 5 * min(4, text.count("!"))
     s += 4 * min(5, len(_STRONG_RE.findall(text)))                          # silná slova
@@ -34,7 +34,7 @@ def _score_window(units):
     gaps = sum(max(0.0, b["start"] - a["end"]) for a, b in zip(units, units[1:]))
     s -= 40 * gaps / dur                                                    # dlouhé pauzy
     first = units[0]["text"].strip()
-    if _FILLER_START.match(first):
+    if _FILLER_START.match(first) and not stream:
         s -= 8                                                              # začíná uprostřed myšlenky
     if "?" in first or _STRONG_RE.search(first):
         s += 8                                                              # silný začátek (hook)
@@ -70,7 +70,7 @@ def select_local(transcript, cfg):
         dur = win[-1]["end"] - win[0]["start"]
         if dur < lo - 3 or dur > hi + 5:
             continue
-        cands.append((_score_window(win), win, dur))
+        cands.append((_score_window(win, cfg.get("clip_style") == "stream"), win, dur))
     if not cands:
         return []
     raw = sorted(c[0] for c in cands)

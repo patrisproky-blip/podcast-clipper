@@ -211,6 +211,8 @@ def worker():
             cfg = build_cfg()
             if job.get("live"):
                 cfg["local_title"] = job["title"]
+                cfg.update(clip_style="stream", auto_stream_layout=True, min_clip_seconds=20, max_clip_seconds=55,
+                           clips_per_video=max(3, int(load_settings().get("live_chunk_min") or 30) // 5))
                 if not has_api_key():       # živé části bez klíče Claude: Gemini (zdarma), jinak výběr přímo v počítači
                     cfg["selection_mode"] = "gemini" if cfg["gemini_key"] else "local"
             if job.get("kind") == "ton":
