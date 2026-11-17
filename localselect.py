@@ -87,6 +87,6 @@ def select_local(transcript, cfg):
         if _STRONG_RE.search(" ".join(u["text"] for u in win)):
             why.append("silná slova")
         out.append({"start": win[0]["start"], "end": win[-1]["end"], "title": _clean(win[0]["text"], 60),
-                    "hook": hook, "score": int(40 + 55 * rank),
+                    "hook": hook, "score": int(30 + 70 * rank ** 3),
                     "reason": ("Automatický výběr: " + ", ".join(why)) if why else "Automatický výběr: svižná řeč"})
     return finalize(out, transcript, cfg)

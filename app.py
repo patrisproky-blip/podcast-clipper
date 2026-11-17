@@ -212,9 +212,11 @@ def worker():
             if job.get("live"):
                 cfg["local_title"] = job["title"]
                 cfg.update(clip_style="stream", auto_stream_layout=True, min_clip_seconds=20, max_clip_seconds=55,
-                           clips_per_video=max(3, int(load_settings().get("live_chunk_min") or 30) // 5))
+                           clips_per_video=12, min_score=70)      # počet klipů není pevný: jen ty nejlepší
                 if not has_api_key():       # živé části bez klíče Claude: Gemini (zdarma), jinak výběr přímo v počítači
                     cfg["selection_mode"] = "gemini" if cfg["gemini_key"] else "local"
+                    if cfg["selection_mode"] == "local":
+                        cfg["clips_per_video"] = 6          # lokální výběr nezná absolutní kvalitu, proto přísnější strop
             if job.get("kind") == "ton":
                 if not job.get("videos"):
                     req = job["ton_request"]

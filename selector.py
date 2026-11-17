@@ -77,9 +77,14 @@ bývá to zajímavé místo.
 - Nevymýšlej nic, co v přepisu není. Název a hook piš česky, přirozeně, bez clickbaitových lží."""
 
 
+QUALITY_ONLY = ("\n- Počet klipů není pevný: vyber jen skutečně silné momenty, klidně jen jeden dva nebo žádný. "
+                "Hodnocení score 80 a víc dej jen výjimečným momentům, průměrným dej pod 60.")
+
+
 def rules(cfg):
     style = cfg.get("clip_style")
-    return RULES_TON if style == "thisorthat" else RULES_STREAM if style == "stream" else RULES
+    base = RULES_TON if style == "thisorthat" else RULES_STREAM if style == "stream" else RULES
+    return base + (QUALITY_ONLY if cfg.get("min_score") else "")
 
 
 SYSTEM = RULES + "\nVrať výsledek voláním nástroje submit_clips."
@@ -239,7 +244,7 @@ def finalize(candidates, transcript, cfg):
     for c in candidates:
         c = _snap(c, words, duration, cfg, starts, ends)
         length = c["end"] - c["start"]
-        if cfg["min_clip_seconds"] - 3 <= length <= cfg["max_clip_seconds"] + 5:
+        if cfg["min_clip_seconds"] - 3 <= length <= cfg["max_clip_seconds"] + 5 and c.get("score", 0) >= cfg.get("min_score", 0):
             ok.append(c)
 
     ok.sort(key=lambda c: c.get("score", 0), reverse=True)
