@@ -20,9 +20,10 @@ def probe(url):
         with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
         return {"live": bool(info.get("is_live")) or info.get("live_status") == "is_live",
+                "was_live": bool(info.get("was_live")) or info.get("live_status") in ("was_live", "post_live"),
                 "title": info.get("title") or url, "id": info.get("id") or ""}
     except Exception:  # noqa: BLE001
-        return {"live": False, "title": url, "id": ""}
+        return {"live": False, "was_live": False, "title": url, "id": ""}
 
 
 def _resolve(url):

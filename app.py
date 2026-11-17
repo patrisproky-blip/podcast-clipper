@@ -209,14 +209,15 @@ def worker():
 
         try:
             cfg = build_cfg()
-            if job.get("live"):
-                cfg["local_title"] = job["title"]
+            if job.get("live") or job.get("stream"):
+                if job.get("live"):
+                    cfg["local_title"] = job["title"]
                 cfg.update(clip_style="stream", auto_stream_layout=True, min_clip_seconds=20, max_clip_seconds=55,
-                           clips_per_video=12, min_score=70)      # počet klipů není pevný: jen ty nejlepší
+                           clips_per_video=12 if job.get("live") else 40, min_score=70)      # počet klipů není pevný: jen ty nejlepší
                 if not has_api_key():       # živé části bez klíče Claude: Gemini (zdarma), jinak výběr přímo v počítači
                     cfg["selection_mode"] = "gemini" if cfg["gemini_key"] else "local"
                     if cfg["selection_mode"] == "local":
-                        cfg["clips_per_video"] = 6          # lokální výběr nezná absolutní kvalitu, proto přísnější strop
+                        cfg["clips_per_video"] = 6 if job.get("live") else 24          # lokální výběr nezná absolutní kvalitu, proto přísnější strop
             if job.get("kind") == "ton":
                 if not job.get("videos"):
                     req = job["ton_request"]
@@ -239,7 +240,7 @@ def worker():
                 job.pop("pending_clips", None)
                 job.pop("prompts", None)
                 job.update(status="done", pct=100, stage="Hotovo", clips=len(results))
-            elif cfg["selection_mode"] in ("api", "local", "gemini") or (job.get("live") and has_api_key()):
+            elif cfg["selection_mode"] in ("api", "local", "gemini") or ((job.get("live") or job.get("stream")) and has_api_key()):
                 if cfg["selection_mode"] == "api" and not has_api_key():
                     raise RuntimeError("Chybí API klíč Claude. Vyplň ho v Nastavení, nebo přepni na ruční výběr.")
                 results = process_video(job["url"], cfg, log, progress)
@@ -574,13 +575,16 @@ def api_add_job():
         return jsonify(error="Zadej platný odkaz na YouTube, Twitch nebo Kick."), 400
     if re.search(r"youtube\.com/(@|channel/|c/|user/)", url) and "watch?v=" not in url and "/live" not in url:
         return jsonify(error="Tohle je odkaz na kanál. Přidej ho v záložce Kanály."), 400
-    if LIVE_RE.match(url) or "/live" in url or "watch?v=" in url:
+    vod = bool(LIVE_RE.match(url) and re.search(r"/videos?/|/clips?/", url))      # záznam streamu na Twitchi/Kicku
+    if not vod and (LIVE_RE.match(url) or "/live" in url or "watch?v=" in url):
         import live
-        if live.probe(url)["live"]:
+        pr = live.probe(url)
+        if pr["live"]:
             return jsonify(_public_job(start_live(url)))
-    if LIVE_RE.match(url) and "/videos/" not in url and "/clip" not in url:
-        return jsonify(error="Stream právě neběží. Zadej odkaz, až bude živě."), 400
-    return jsonify(_public_job(add_job(url)))
+        vod = pr.get("was_live", False)         # YouTube: skončený stream
+    if LIVE_RE.match(url) and not vod:
+        return jsonify(error="Stream právě neběží. Zadej odkaz, až bude živě, nebo odkaz na záznam."), 400
+    return jsonify(_public_job(add_job(url, **({"stream": True} if vod else {}))))
 
 
 @app.delete("/api/jobs/<jid>")
